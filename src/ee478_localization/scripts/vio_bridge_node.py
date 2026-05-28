@@ -109,25 +109,28 @@ class VioBridgeNode:
         self.applied_offset = [0.0, 0.0, 0.0]
         self.target_offset = [0.0, 0.0, 0.0]
 
-        # --- bootstrap mode ---
-        # VINS-Fusion cannot converge on a stationary drone (no
-        # parallax, no IMU excitation), but the drone can't take off
-        # without vision_pose because EKF2 is configured for vision
-        # only. We bridge this by FALLING BACK to gazebo ground truth
-        # while VINS hasn't published a stable odometry stream, then
-        # switching to VINS once the bridge has seen N consecutive
-        # samples from /vins_estimator/odometry that pass the
-        # covariance + jump gates. Real drones use a manual fly to
-        # warm up the VIO; SITL has GT so we use it.
+        # --- bootstrap + handoff state machine ---
+        # The bridge starts in BOOTSTRAP mode (publish GT directly).
+        # On every VINS odometry sample we compute the offset
+        # GT - VINS so we can express "where VINS thinks the drone
+        # is" in the SAME map frame as GT. Once N consecutive offsets
+        # agree within `handoff_offset_tol_m`, we lock the offset and
+        # switch to TRACKING mode where the bridge publishes
+        # (VINS + offset). Loop-closure jumps in VINS are absorbed by
+        # the existing tracking_lost gate.
         self.bootstrap_enabled = bool(
             rospy.get_param("~bootstrap_enabled", True))
-        self.bootstrap_required_vins_samples = int(
-            rospy.get_param("~bootstrap_required_vins_samples", 30))
         self.gt_model = rospy.get_param(
             "~gt_model", "iris_depth_camera_vio")
-        self.vins_sample_count = 0
-        self.bootstrap_active = self.bootstrap_enabled
+        self.handoff_required_samples = int(
+            rospy.get_param("~handoff_required_samples", 30))
+        self.handoff_offset_tol_m = float(
+            rospy.get_param("~handoff_offset_tol_m", 0.10))
+        # mode: "BOOTSTRAP" or "TRACKING"
+        self.mode = "BOOTSTRAP" if self.bootstrap_enabled else "TRACKING"
         self.latest_gt_pose = None  # PoseStamped from gazebo
+        self.recent_offsets = []   # list of (dx, dy, dz)
+        self.locked_offset = None  # (dx, dy, dz) once handoff done
 
         # --- ROS I/O ---
         self.pub = rospy.Publisher(
@@ -150,15 +153,68 @@ class VioBridgeNode:
             f"loop={self.loop_topic or '(none)'} "
             f"anchor={self.anchor_topic} -> {self.vision_topic} "
             f"@ {self.rate_hz:.0f} Hz "
-            f"bootstrap={self.bootstrap_enabled} "
-            f"(switch after {self.bootstrap_required_vins_samples} "
-            f"good VINS samples)")
+            f"mode={self.mode} "
+            f"(handoff after {self.handoff_required_samples} samples "
+            f"within {self.handoff_offset_tol_m:.2f} m offset)")
 
     # ----- subscribers -----
     def on_vo(self, msg):
-        """Apply safety gate to every VO sample before storing."""
+        """Track VINS samples for GT->VINS handoff and for the
+        covariance/jump gates in TRACKING mode."""
         with self.lock:
-            # 1) covariance gate
+            mode = self.mode
+
+        if mode == "BOOTSTRAP":
+            # While we're publishing GT, monitor the VINS-GT offset.
+            # When it stabilises (latest N samples agree within
+            # handoff_offset_tol_m), we lock the offset and switch to
+            # TRACKING mode (publish VINS + offset). VINS itself
+            # diverging in absolute frame is fine — we only care that
+            # the offset is consistent.
+            with self.lock:
+                gt = self.latest_gt_pose
+            if gt is None:
+                return
+            vp = msg.pose.pose.position
+            offset = (gt.pose.position.x - vp.x,
+                      gt.pose.position.y - vp.y,
+                      gt.pose.position.z - vp.z)
+            with self.lock:
+                self.recent_offsets.append(offset)
+                if len(self.recent_offsets) > self.handoff_required_samples:
+                    self.recent_offsets.pop(0)
+                self.last_vo = (msg, rospy.Time.now())
+
+                if len(self.recent_offsets) >= self.handoff_required_samples:
+                    n = len(self.recent_offsets)
+                    mx = sum(o[0] for o in self.recent_offsets) / n
+                    my = sum(o[1] for o in self.recent_offsets) / n
+                    mz = sum(o[2] for o in self.recent_offsets) / n
+                    spread = max(
+                        max(abs(o[0] - mx) for o in self.recent_offsets),
+                        max(abs(o[1] - my) for o in self.recent_offsets),
+                        max(abs(o[2] - mz) for o in self.recent_offsets))
+                    if spread <= self.handoff_offset_tol_m:
+                        # At handoff, applied_offset jumps INSTANTLY
+                        # to the mean offset. After this, applied
+                        # slowly slides as the GT-VINS difference
+                        # evolves with VINS drift, so vision_pose
+                        # remains continuous and close to GT.
+                        self.applied_offset = [mx, my, mz]
+                        self.target_offset = [mx, my, mz]
+                        self.mode = "TRACKING"
+                        rospy.loginfo(
+                            f"[vio_bridge] VINS converged. handing off "
+                            f"GT -> VINS with initial offset "
+                            f"({mx:.2f}, {my:.2f}, {mz:.2f}) m "
+                            f"spread={spread:.3f} m. From now on the "
+                            f"published vision_pose is VINS-based with "
+                            f"continuous anchor correction.")
+            return
+
+        # mode == "TRACKING": apply safety gates against drift / jumps
+        # within VINS itself (loop closure can still produce jumps).
+        with self.lock:
             cov_xx = msg.pose.covariance[0]
             if cov_xx > self.max_cov_m2:
                 self.tracking_lost = True
@@ -169,18 +225,15 @@ class VioBridgeNode:
                     f"{self.max_cov_m2:.2f} — tracking lost, hold")
                 return
 
-            # 2) jump gate (against last PUBLISHED pose, not last VO)
+            # In TRACKING, jump gate against the last published pose.
+            # On a real jump we fall BACK to BOOTSTRAP so the drone
+            # keeps flying via GT while VINS's new frame stabilises
+            # and a fresh handoff can re-lock the offset.
             if self.last_pub_xyz is not None:
-                # The VO frame's idea of "drone at" needs to be
-                # compared to the FRAME we publish in. We add the
-                # currently applied offset so VO + offset is what
-                # vision_pose would be IF we published right now.
                 vp = msg.pose.pose.position
-                cand = (
-                    vp.x + self.applied_offset[0],
-                    vp.y + self.applied_offset[1],
-                    vp.z + self.applied_offset[2],
-                )
+                cand = (vp.x + self.applied_offset[0],
+                        vp.y + self.applied_offset[1],
+                        vp.z + self.applied_offset[2])
                 jump = _norm3(
                     cand[0] - self.last_pub_xyz[0],
                     cand[1] - self.last_pub_xyz[1],
@@ -194,9 +247,17 @@ class VioBridgeNode:
                         f"[vio_bridge] VO jump {jump:.2f} m > "
                         f"{self.max_jump_m:.2f} m — tracking lost "
                         f"#{self.jump_count}, hold")
+                    if self.bootstrap_enabled and self.mode == "TRACKING":
+                        rospy.logwarn(
+                            "[vio_bridge] VINS diverged in TRACKING; "
+                            "fall back to BOOTSTRAP to re-accumulate "
+                            "offset against new VINS frame")
+                        self.mode = "BOOTSTRAP"
+                        self.recent_offsets = []
+                        self.applied_offset = [0.0, 0.0, 0.0]
+                        self.target_offset = [0.0, 0.0, 0.0]
                     return
 
-            # accept
             self.last_vo = (msg, rospy.Time.now())
             if self.tracking_lost:
                 self.sane_streak += 1
@@ -205,18 +266,20 @@ class VioBridgeNode:
                     rospy.loginfo(
                         f"[vio_bridge] VO resumed after "
                         f"{self.sane_streak} sane samples")
-
-            # Bootstrap progress: count good VINS samples toward the
-            # GT -> VINS handover.
-            if self.bootstrap_active:
-                self.vins_sample_count += 1
-                if self.vins_sample_count >= (
-                        self.bootstrap_required_vins_samples):
-                    self.bootstrap_active = False
-                    rospy.loginfo(
-                        f"[vio_bridge] VINS converged "
-                        f"({self.vins_sample_count} samples); "
-                        f"handing over from GT to VINS")
+                else:
+                    # While we are still considered LOST, fall back to
+                    # GT bootstrap so the drone keeps flying. We also
+                    # restart offset accumulation so the next handoff
+                    # uses the CURRENT VINS frame (which has drifted
+                    # since the original lock).
+                    if self.mode == "TRACKING" and self.bootstrap_enabled:
+                        rospy.logwarn_once(
+                            "[vio_bridge] VINS unstable in TRACKING; "
+                            "falling back to BOOTSTRAP (GT) while "
+                            "re-accumulating VINS-GT offset")
+                        self.mode = "BOOTSTRAP"
+                        self.recent_offsets = []
+                        self.locked_offset = None
 
     def on_loop(self, msg):
         """Loop-closure-corrected pose (optional)."""
@@ -280,12 +343,14 @@ class VioBridgeNode:
             loop = self.last_loop
             applied = list(self.applied_offset)
             target = list(self.target_offset)
-            bootstrap = self.bootstrap_active
+            mode = self.mode
             gt = self.latest_gt_pose
+            locked = self.locked_offset
 
-        # Bootstrap path: publish GT directly while VINS is warming
-        # up. Skips covariance / jump / anchor logic — GT is exact.
-        if bootstrap:
+        if mode == "BOOTSTRAP":
+            # Publish GT directly while VINS is converging on the
+            # GT-VINS offset. Skips the safety gates because GT is
+            # exact in sim.
             if gt is None:
                 return
             out = PoseStamped()
@@ -323,6 +388,11 @@ class VioBridgeNode:
             else:
                 applied[i] += step if d > 0 else -step
 
+        # TRACKING mode: vision_pose = VINS + applied_offset. The
+        # applied_offset is the full VINS-frame -> map transform; it
+        # slides toward target_offset (set in on_vo to GT - VINS, or
+        # in on_anchor to the landmark fix) at anchor_blend_rate so
+        # the output stream is smooth.
         out = PoseStamped()
         out.header.stamp = now
         out.header.frame_id = "map"

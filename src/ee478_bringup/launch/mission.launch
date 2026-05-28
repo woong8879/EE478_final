@@ -58,6 +58,30 @@
         type="odom_tf_broadcaster_node.py"
         name="odom_tf_broadcaster" output="screen"/>
 
+  <!-- 3c. VINS-Fusion pre-flight excitation (only when VINS is the
+       VIO source). After takeoff, this node injects a 5 s lissajous
+       on /next_goal so VINS gets 3-axis motion data and converges
+       on metric scale BEFORE the mission proper starts. The FSM
+       waits for /vins_excitation/done before leaving the takeoff
+       hover. -->
+  <group if="$(eval vio_source == 'vins')">
+    <node pkg="ee478_localization" type="vins_excitation_node.py"
+          name="vins_excitation" output="screen">
+      <param name="excitation_duration_s" value="5.0"/>
+      <param name="amplitude_xy_m"         value="0.3"/>
+      <param name="amplitude_z_m"          value="0.15"/>
+      <param name="center_z_m"             value="0.7"/>
+    </node>
+    <!-- SIM-ONLY landmark anchor injection at 1 Hz. Stands in for
+         the real-drone perception pipeline. Without this, VINS drift
+         accumulates unchecked and the drone navigates by stale
+         vision_pose. -->
+    <node pkg="ee478_localization" type="sim_landmark_anchor_node.py"
+          name="sim_landmark_anchor" output="screen">
+      <param name="rate_hz" value="1.0"/>
+    </node>
+  </group>
+
   <!-- 4. Mission agents (Phase 5 / 6 / 8 / 10). -->
   <node pkg="ee478_agent" type="command_interpreter_node.py"
         name="command_interpreter" output="screen">
@@ -85,5 +109,9 @@
          around the corridor walls. EGO does its own avoidance so
          we should pass only the final goals through. -->
     <param name="use_bypass" value="$(eval planner == 'direct')"/>
+    <!-- Wait for VINS excitation to finish only when VINS is the
+         VIO source (GT bridge doesn't need excitation). -->
+    <param name="wait_for_vins_excite"
+           value="$(eval vio_source == 'vins')"/>
   </node>
 </launch>

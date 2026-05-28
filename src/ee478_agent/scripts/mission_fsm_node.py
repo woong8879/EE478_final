@@ -56,6 +56,9 @@ from std_msgs.msg import Bool, Int32, String
 from ee478_msgs.msg import SemanticMap
 
 
+_EXCITE_TIMEOUT_S = 12.0
+
+
 HOVER_Z = 0.7
 TAKEOFF_THRESHOLD_M = 0.30
 
@@ -138,6 +141,12 @@ class MissionFSM:
             rospy.get_param("~arrival_radius_z_m", 0.4))
         self.signature_done = False
         self.takeoff_latched = False
+        self.excite_done = False
+        self.excite_wait_start = None
+        # Allow disabling the wait when the GT bridge is in use (no
+        # VINS excitation needed).
+        self.wait_for_vins_excite = bool(
+            rospy.get_param("~wait_for_vins_excite", False))
 
         self.pub_goal = rospy.Publisher("/next_goal", PoseStamped,
                                         queue_size=5)
@@ -160,6 +169,8 @@ class MissionFSM:
                          self.on_reached, queue_size=5)
         rospy.Subscriber("/mission/signature_done", Bool,
                          self.on_sig_done, queue_size=2)
+        rospy.Subscriber("/vins_excitation/done", Bool,
+                         self.on_excite_done, queue_size=2)
 
         rospy.Timer(rospy.Duration(1.0 / self.tick_hz), self.tick)
         self._set_state("INIT")
@@ -218,6 +229,11 @@ class MissionFSM:
             if msg.data:
                 self.signature_done = True
 
+    def on_excite_done(self, msg):
+        with self.lock:
+            if msg.data:
+                self.excite_done = True
+
     # ---------- helpers ----------
     def _publish_goal(self, x, y, z=None, yaw=0.0, label=None):
         z = self.hover_z if z is None else z
@@ -248,6 +264,23 @@ class MissionFSM:
                 return False
             return (self.pending_min_dxy < self.arrival_radius
                     and self.pending_min_dz < self.arrival_radius_z)
+
+    def _reassert_pending(self):
+        """Re-publish the active goal so a transient race against
+        another /next_goal publisher doesn't leave ego_bridge stuck
+        on a stale waypoint. Called every tick."""
+        with self.lock:
+            if self.pending_goal_xyz is None:
+                return
+            x, y, z = self.pending_goal_xyz
+        g = PoseStamped()
+        g.header.stamp = rospy.Time.now()
+        g.header.frame_id = self.world_frame
+        g.pose.position.x = x
+        g.pose.position.y = y
+        g.pose.position.z = z
+        g.pose.orientation.w = 1.0
+        self.pub_goal.publish(g)
 
     def _clear_pending(self):
         with self.lock:
@@ -294,6 +327,11 @@ class MissionFSM:
 
     # ---------- tick ----------
     def tick(self, _evt):
+        # Belt-and-suspenders: every tick republish the active goal so
+        # transient publishes by other /next_goal sources (excitation
+        # tail, signature_move replays, etc.) can't leave the planner
+        # stuck on a stale waypoint.
+        self._reassert_pending()
         with self.lock:
             state = self.state
             pose = self.drone_pose
@@ -314,6 +352,27 @@ class MissionFSM:
                 self._set_state("AWAIT_TAKEOFF")
         elif state == "AWAIT_TAKEOFF":
             if took_off:
+                if self.wait_for_vins_excite:
+                    self._set_state("AWAIT_VINS_EXCITE")
+                else:
+                    self._set_state("APPROACH_QUIZ")
+        elif state == "AWAIT_VINS_EXCITE":
+            with self.lock:
+                done = self.excite_done
+                if self.excite_wait_start is None:
+                    self.excite_wait_start = rospy.Time.now()
+                waited = (rospy.Time.now()
+                          - self.excite_wait_start).to_sec()
+            if done:
+                rospy.loginfo(
+                    "[mission_fsm] VINS excitation done; mission "
+                    "proceeds")
+                self._set_state("APPROACH_QUIZ")
+            elif waited > _EXCITE_TIMEOUT_S:
+                rospy.logwarn(
+                    f"[mission_fsm] VINS excitation timed out after "
+                    f"{waited:.0f} s; proceeding anyway (bootstrap "
+                    f"vision_pose will carry the mission)")
                 self._set_state("APPROACH_QUIZ")
         elif state == "APPROACH_QUIZ":
             # Hover BACK from the gate-pair so perception can see both

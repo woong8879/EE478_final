@@ -11,5 +11,7 @@ catkin_install_python(PROGRAMS
   scripts/landmark_anchor_publisher_node.py
   scripts/odom_tf_broadcaster_node.py
   scripts/camera_pose_publisher_node.py
+  scripts/vins_excitation_node.py
+  scripts/sim_landmark_anchor_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
