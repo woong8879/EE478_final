@@ -28,6 +28,7 @@ Run with QGroundControl open for manual override / arming if PX4 refuses auto-ar
 m.
 """
 
+import math as _math
 import threading
 
 import rospy
@@ -46,6 +47,16 @@ class OffboardController:
         self.takeoff_alt = float(rospy.get_param("~takeoff_alt", 1.5))
         self.auto_arm = bool(rospy.get_param("~auto_arm", True))
         self.frame_id = rospy.get_param("~frame_id", "map")
+        # Cap for the velocity feedforward injected on top of position
+        # setpoints. Keeps long position steps from sending PX4 into
+        # huge climbs/overshoots.
+        self.max_step_vel = float(rospy.get_param("~max_step_vel", 1.0))
+        # Vertical velocity feedforward cap (m/s). Separately specified
+        # because the SITL altitude loop diverges if we let xy and z
+        # share a single horizon-aware velocity cap (z gets squeezed to
+        # near-zero on long horizontal steps and the drone drifts up).
+        self.max_step_vel_z = float(
+            rospy.get_param("~max_step_vel_z", 0.5))
         # Hold takeoff setpoint for this long after arming so PX4 EKF z
         # converges before any horizontal navigation goals are honoured.
         self.settle_s = float(rospy.get_param("~settle_s", 120.0))
@@ -176,10 +187,70 @@ class OffboardController:
             rate.sleep()
 
     def _publish(self):
+        """Stream the active setpoint to PX4.
+
+        When the active goal is a plain PoseStamped (`use_raw=False`),
+        publish a PositionTarget on /mavros/setpoint_raw/local with a
+        VELOCITY FEEDFORWARD pointing from the current pose toward the
+        goal, capped at `max_step_vel`. This is what PX4 SITL actually
+        needs to track a multi-metre position step — without the
+        velocity hint the position controller is so sluggish that long
+        steps either stall the drone or send it climbing to weird
+        altitudes. We keep publishing /mavros/setpoint_position/local
+        as well so any other consumer that still wants the raw goal
+        sees it.
+        """
         with self.lock:
-            if not self.use_raw:
-                self.setpoint.header.stamp = rospy.Time.now()
-                self.pub_sp.publish(self.setpoint)
+            if self.use_raw:
+                return
+            sp = self.setpoint
+            sp.header.stamp = rospy.Time.now()
+            self.pub_sp.publish(sp)
+
+            # Build a setpoint_raw with position + capped velocity.
+            cp = self.current_pose
+            if cp is None:
+                return
+            tgt = PositionTarget()
+            tgt.header.stamp = rospy.Time.now()
+            tgt.header.frame_id = self.frame_id
+            tgt.coordinate_frame = PositionTarget.FRAME_LOCAL_NED
+            # type_mask: use POSITION + VELOCITY (feedforward), set yaw,
+            # ignore acceleration and yaw_rate.
+            tgt.type_mask = (PositionTarget.IGNORE_AFX
+                             | PositionTarget.IGNORE_AFY
+                             | PositionTarget.IGNORE_AFZ
+                             | PositionTarget.IGNORE_YAW_RATE)
+            tgt.position.x = sp.pose.position.x
+            tgt.position.y = sp.pose.position.y
+            tgt.position.z = sp.pose.position.z
+
+            # Decouple horizontal vs vertical velocity feedforward.
+            # XY: cap by max_step_vel along the xy direction so a long
+            # horizontal step doesn't ask PX4 for 10 m/s.
+            # Z: ALWAYS commanded toward the target altitude at up to
+            # max_step_vel_z. Without this, PX4 SITL's altitude loop
+            # drifts (it tries to maintain z by attitude, and the
+            # horizontal pitching pushes the drone up). With a steady
+            # vz hint, PX4 actively converges to z_target.
+            dx = sp.pose.position.x - cp.pose.position.x
+            dy = sp.pose.position.y - cp.pose.position.y
+            dz = sp.pose.position.z - cp.pose.position.z
+            dxy = (dx * dx + dy * dy) ** 0.5
+            v_max = self.max_step_vel
+            if dxy > 1e-3:
+                k_xy = min(1.0, v_max / dxy)
+                tgt.velocity.x = dx * k_xy
+                tgt.velocity.y = dy * k_xy
+            v_max_z = self.max_step_vel_z
+            if abs(dz) > 1e-3:
+                tgt.velocity.z = max(-v_max_z,
+                                     min(v_max_z, dz * 2.0))
+            q = sp.pose.orientation
+            siny = 2.0 * (q.w * q.z + q.x * q.y)
+            cosy = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+            tgt.yaw = _math.atan2(siny, cosy)
+            self.pub_sp_raw.publish(tgt)
 
 
 if __name__ == "__main__":
