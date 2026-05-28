@@ -15,6 +15,12 @@
 -->
 <launch>
   <arg name="vio_source" default="gt"/>
+  <!-- planner: "direct" -> trivial /next_goal -> /offboard/goal stream
+                            (no avoidance, PX4 position controller).
+                            Used for sim verification while EGO is
+                            being debugged.
+                "ego"    -> EGO-Planner-V2 with depth-cloud grid_map. -->
+  <arg name="planner"    default="direct"/>
 
   <!-- 1. PX4 SITL + VIO airframe + MAVROS + camera TF -->
   <include file="$(find ee478_bringup)/launch/px4_sitl.launch">
@@ -43,12 +49,21 @@
     </node>
   </group>
 
-  <!-- 3. EGO-Planner -->
-  <include file="$(find ee478_planner)/launch/ego_planner.launch">
-    <arg name="cloud_topic"      value="/iris_depth_camera_vio/camera/depth/points"/>
-    <arg name="planning_horizon" value="3.0"/>
-    <arg name="max_vel"          value="0.6"/>
-  </include>
+  <!-- 3. Planner -->
+  <group if="$(eval planner == 'direct')">
+    <node pkg="ee478_planner" type="direct_goal_follower.py"
+          name="direct_goal_follower" output="screen">
+      <param name="rate_hz"          value="20.0"/>
+      <param name="arrival_radius_m" value="0.5"/>
+    </node>
+  </group>
+  <group if="$(eval planner == 'ego')">
+    <include file="$(find ee478_planner)/launch/ego_planner.launch">
+      <arg name="cloud_topic"      value="/iris_depth_camera_vio/camera/depth/points"/>
+      <arg name="planning_horizon" value="3.0"/>
+      <arg name="max_vel"          value="0.6"/>
+    </include>
+  </group>
 
   <!-- 4. Offboard controller (accepts /offboard/cmd_raw from ego_bridge) -->
   <node pkg="ee478_planner" type="offboard_controller.py"

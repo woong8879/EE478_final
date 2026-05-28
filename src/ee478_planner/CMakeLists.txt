@@ -8,5 +8,6 @@ catkin_package(CATKIN_DEPENDS rospy)
 catkin_install_python(PROGRAMS
   scripts/offboard_controller.py
   scripts/ego_bridge_node.py
+  scripts/direct_goal_follower.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
