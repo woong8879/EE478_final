@@ -1,0 +1,78 @@
+<?xml version="1.0"?>
+<!--
+  Full EE478 final-project mission stack.
+
+  Brings up:
+    - PX4 SITL + Gazebo + MAVROS + camera TF
+    - GT or VINS-Fusion VIO (sim default = gt)
+    - direct_goal_follower OR ego_planner (sim default = direct)
+    - sim_world_publisher (sim only: fabricates /semantic_map and
+                          /quiz/gates from gazebo GT)
+    - command_interpreter (LLM/keyword) -> /mission_target
+    - quiz_solver         (math eval)   -> /quiz/chosen_pose
+    - signature_move      (bobble+spin)
+    - mission_fsm         (5-step orchestrator)
+
+  Args:
+    vio_source = gt | vins
+    planner    = direct | ego
+    mission_command = "Deliver to the cafe"     // natural language
+    question   = "5 + 9 = ?"
+    gate_left_label / gate_center_label / gate_right_label = ints
+-->
+<launch>
+  <arg name="vio_source"      default="gt"/>
+  <arg name="planner"         default="direct"/>
+  <arg name="mission_command" default="Deliver to the cafe"/>
+  <arg name="question"        default="5 + 9 = ?"/>
+  <arg name="gate_left_label"   default="14"/>
+  <arg name="gate_center_label" default="7"/>
+  <arg name="gate_right_label"  default="9"/>
+
+  <!-- 1. core sim + VIO + planner (Phase 1-3 stack). -->
+  <include file="$(find ee478_bringup)/launch/flight_test.launch">
+    <arg name="vio_source" value="$(arg vio_source)"/>
+    <arg name="planner"    value="$(arg planner)"/>
+  </include>
+
+  <!-- 2. SIM perception stub (Phase 5+ trigger source). -->
+  <node pkg="ee478_perception" type="sim_world_publisher_node.py"
+        name="sim_world_publisher" output="screen">
+    <param name="question"           value="$(arg question)"/>
+    <param name="gate_left_label"    value="$(arg gate_left_label)"/>
+    <param name="gate_center_label"  value="$(arg gate_center_label)"/>
+    <param name="gate_right_label"   value="$(arg gate_right_label)"/>
+  </node>
+
+  <!-- 3. Landmark anchor publisher (Phase 4). Only meaningful when
+       VINS is in use; harmless in GT mode (no SignboardArray ->
+       silent). -->
+  <node pkg="ee478_localization"
+        type="landmark_anchor_publisher_node.py"
+        name="landmark_anchor_publisher" output="screen"/>
+
+  <!-- 4. Mission agents (Phase 5 / 6 / 8 / 10). -->
+  <node pkg="ee478_agent" type="command_interpreter_node.py"
+        name="command_interpreter" output="screen">
+    <param name="initial_command" value="$(arg mission_command)"/>
+    <param name="allow_llm"       value="true"/>
+  </node>
+
+  <node pkg="ee478_agent" type="quiz_solver_node.py"
+        name="quiz_solver" output="screen">
+    <param name="target_z" value="0.7"/>
+  </node>
+
+  <node pkg="ee478_agent" type="signature_move_node.py"
+        name="signature_move" output="screen">
+    <param name="bobble_dz"     value="0.4"/>
+    <param name="spin_dyaw_deg" value="180.0"/>
+  </node>
+
+  <node pkg="ee478_agent" type="mission_fsm_node.py"
+        name="mission_fsm" output="screen">
+    <param name="quiz_approach_back_m" value="2.0"/>
+    <param name="gate_pass_forward_m"  value="1.5"/>
+    <param name="store_standoff_m"     value="1.5"/>
+  </node>
+</launch>

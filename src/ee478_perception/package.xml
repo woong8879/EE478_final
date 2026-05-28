@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>ee478_perception</name>
+  <version>0.1.0</version>
+  <description>
+    Perception nodes for the EE478 final project. Real-drone target:
+    YOLO + AprilTag signboard detection running on Jetson Orin Nano
+    (TensorRT FP16). For sim verification ahead of perception bring-up
+    this package ships a Gazebo-GT publisher that fabricates the
+    SignboardArray / SemanticMap stream from /gazebo/model_states.
+  </description>
+  <maintainer email="woongrae8879@gmail.com">Woongrae Jo</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  <build_depend>rospy</build_depend>
+
+  <exec_depend>rospy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>gazebo_msgs</exec_depend>
+  <exec_depend>ee478_msgs</exec_depend>
+</package>

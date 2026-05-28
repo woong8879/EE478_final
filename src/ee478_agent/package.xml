@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>ee478_agent</name>
+  <version>0.1.0</version>
+  <description>
+    Mission orchestration for the EE478 final project: LLM command
+    parser, quiz-gate solver, signature-move executor, and the top-level
+    state machine that drives /next_goal through the 5-step mission flow
+    (read command -> quiz gate -> store -> signature -> return).
+  </description>
+  <maintainer email="woongrae8879@gmail.com">Woongrae Jo</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  <build_depend>rospy</build_depend>
+
+  <exec_depend>rospy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>ee478_msgs</exec_depend>
+</package>

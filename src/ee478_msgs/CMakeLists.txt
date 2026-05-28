@@ -14,6 +14,8 @@ add_message_files(FILES
   SignboardArray.msg
   TargetDetection.msg
   TargetDetectionArray.msg
+  QuizGate.msg
+  QuizGateArray.msg
 )
 
 generate_messages(
