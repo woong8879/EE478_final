@@ -47,6 +47,12 @@ import rospy
 from geometry_msgs.msg import PoseStamped, Point
 from nav_msgs.msg import Odometry
 
+try:
+    from gazebo_msgs.msg import ModelStates
+    _HAS_MODEL_STATES = True
+except ImportError:
+    _HAS_MODEL_STATES = False
+
 
 def _norm3(dx, dy, dz):
     return math.sqrt(dx * dx + dy * dy + dz * dz)
@@ -103,6 +109,26 @@ class VioBridgeNode:
         self.applied_offset = [0.0, 0.0, 0.0]
         self.target_offset = [0.0, 0.0, 0.0]
 
+        # --- bootstrap mode ---
+        # VINS-Fusion cannot converge on a stationary drone (no
+        # parallax, no IMU excitation), but the drone can't take off
+        # without vision_pose because EKF2 is configured for vision
+        # only. We bridge this by FALLING BACK to gazebo ground truth
+        # while VINS hasn't published a stable odometry stream, then
+        # switching to VINS once the bridge has seen N consecutive
+        # samples from /vins_estimator/odometry that pass the
+        # covariance + jump gates. Real drones use a manual fly to
+        # warm up the VIO; SITL has GT so we use it.
+        self.bootstrap_enabled = bool(
+            rospy.get_param("~bootstrap_enabled", True))
+        self.bootstrap_required_vins_samples = int(
+            rospy.get_param("~bootstrap_required_vins_samples", 30))
+        self.gt_model = rospy.get_param(
+            "~gt_model", "iris_depth_camera_vio")
+        self.vins_sample_count = 0
+        self.bootstrap_active = self.bootstrap_enabled
+        self.latest_gt_pose = None  # PoseStamped from gazebo
+
         # --- ROS I/O ---
         self.pub = rospy.Publisher(
             self.vision_topic, PoseStamped, queue_size=10)
@@ -114,13 +140,19 @@ class VioBridgeNode:
                              self.on_loop, queue_size=10)
         rospy.Subscriber(self.anchor_topic, PoseStamped,
                          self.on_anchor, queue_size=5)
+        if self.bootstrap_enabled and _HAS_MODEL_STATES:
+            rospy.Subscriber("/gazebo/model_states", ModelStates,
+                             self.on_gt, queue_size=1)
 
         rospy.Timer(rospy.Duration(1.0 / self.rate_hz), self.tick)
         rospy.loginfo(
             f"[vio_bridge] vo={self.vo_topic} "
             f"loop={self.loop_topic or '(none)'} "
             f"anchor={self.anchor_topic} -> {self.vision_topic} "
-            f"@ {self.rate_hz:.0f} Hz")
+            f"@ {self.rate_hz:.0f} Hz "
+            f"bootstrap={self.bootstrap_enabled} "
+            f"(switch after {self.bootstrap_required_vins_samples} "
+            f"good VINS samples)")
 
     # ----- subscribers -----
     def on_vo(self, msg):
@@ -174,10 +206,37 @@ class VioBridgeNode:
                         f"[vio_bridge] VO resumed after "
                         f"{self.sane_streak} sane samples")
 
+            # Bootstrap progress: count good VINS samples toward the
+            # GT -> VINS handover.
+            if self.bootstrap_active:
+                self.vins_sample_count += 1
+                if self.vins_sample_count >= (
+                        self.bootstrap_required_vins_samples):
+                    self.bootstrap_active = False
+                    rospy.loginfo(
+                        f"[vio_bridge] VINS converged "
+                        f"({self.vins_sample_count} samples); "
+                        f"handing over from GT to VINS")
+
     def on_loop(self, msg):
         """Loop-closure-corrected pose (optional)."""
         with self.lock:
             self.last_loop = (msg, rospy.Time.now())
+
+    def on_gt(self, msg):
+        """Cache the ground-truth drone pose from gazebo for the
+        bootstrap window. Becomes a noop once VINS has converged."""
+        try:
+            idx = msg.name.index(self.gt_model)
+        except ValueError:
+            return
+        p = msg.pose[idx]
+        ps = PoseStamped()
+        ps.header.stamp = rospy.Time.now()
+        ps.header.frame_id = "map"
+        ps.pose = p
+        with self.lock:
+            self.latest_gt_pose = ps
 
     def on_anchor(self, msg):
         """Sparse landmark fix: 'drone IS at msg.pose right now'.
@@ -221,6 +280,25 @@ class VioBridgeNode:
             loop = self.last_loop
             applied = list(self.applied_offset)
             target = list(self.target_offset)
+            bootstrap = self.bootstrap_active
+            gt = self.latest_gt_pose
+
+        # Bootstrap path: publish GT directly while VINS is warming
+        # up. Skips covariance / jump / anchor logic — GT is exact.
+        if bootstrap:
+            if gt is None:
+                return
+            out = PoseStamped()
+            out.header.stamp = now
+            out.header.frame_id = "map"
+            out.pose = gt.pose
+            self.pub.publish(out)
+            with self.lock:
+                self.last_pub_xyz = (
+                    out.pose.position.x,
+                    out.pose.position.y,
+                    out.pose.position.z)
+            return
 
         if lost:
             return

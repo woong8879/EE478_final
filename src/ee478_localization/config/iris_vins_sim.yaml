@@ -9,7 +9,7 @@ imu: 1
 num_of_cam: 1
 
 imu_topic: "/mavros/imu/data"
-image0_topic: "/iris_depth_camera/camera/rgb/image_raw"
+image0_topic: "/iris_depth_camera_vio/camera/rgb/image_raw"
 image1_topic: ""
 output_path: "/tmp/vins_output/"
 
