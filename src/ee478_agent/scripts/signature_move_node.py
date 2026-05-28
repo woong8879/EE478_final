@@ -90,12 +90,14 @@ class SignatureMove:
                 return
             p = self.drone_pose.pose.position
             yaw0 = _yaw_from_quat(self.drone_pose.pose.orientation)
-            # 4 waypoints; we just override the seq through self.steps.
+            # NO z bobble: any altitude change while EGO is still
+            # active competes with EGO's own z plan and ends with the
+            # drone on the floor in sim. The "signature" is purely a
+            # 360 deg yaw rotation in place at hover_z.
+            hover_z = float(rospy.get_param("~hover_z", 0.7))
             self.steps = [
-                (p.x, p.y, p.z + self.bobble_dz, yaw0),
-                (p.x, p.y, p.z,                    yaw0),
-                (p.x, p.y, p.z, yaw0 + self.spin_dyaw),
-                (p.x, p.y, p.z, yaw0),
+                (p.x, p.y, hover_z, yaw0 + self.spin_dyaw),
+                (p.x, p.y, hover_z, yaw0),
             ]
             self.step_idx = 0
             self.active_store_id = int(msg.data)

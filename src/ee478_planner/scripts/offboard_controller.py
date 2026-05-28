@@ -189,23 +189,22 @@ class OffboardController:
     def _publish(self):
         """Stream the active setpoint to PX4.
 
-        When the active goal is a plain PoseStamped (`use_raw=False`),
-        publish a PositionTarget on /mavros/setpoint_raw/local with a
-        VELOCITY FEEDFORWARD pointing from the current pose toward the
-        goal, capped at `max_step_vel`. This is what PX4 SITL actually
-        needs to track a multi-metre position step — without the
-        velocity hint the position controller is so sluggish that long
-        steps either stall the drone or send it climbing to weird
-        altitudes. We keep publishing /mavros/setpoint_position/local
-        as well so any other consumer that still wants the raw goal
-        sees it.
+        We ALWAYS publish /mavros/setpoint_position/local at the FSM
+        goal even when the EGO-via-cmd_raw path is active. PX4 needs a
+        continuous setpoint stream or COM_OF_LOSS_T (~2 s) drops it
+        out of OFFBOARD; in our setup EGO's cmd_raw rate hiccups when
+        it replans (or fails to plan during the return leg), and
+        without this backup the drone falls back to POSCTL and slowly
+        descends to the floor.
         """
         with self.lock:
-            if self.use_raw:
-                return
             sp = self.setpoint
             sp.header.stamp = rospy.Time.now()
             self.pub_sp.publish(sp)
+            if self.use_raw:
+                # cmd_raw publishes setpoint_raw/local at its own rate;
+                # we just keep setpoint_position alive as a fallback.
+                return
 
             # Build a setpoint_raw with position + capped velocity.
             cp = self.current_pose

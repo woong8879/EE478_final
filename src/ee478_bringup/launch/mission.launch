@@ -51,6 +51,13 @@
         type="landmark_anchor_publisher_node.py"
         name="landmark_anchor_publisher" output="screen"/>
 
+  <!-- 3b. tf broadcaster map -> base_link from /mavros/local_position
+       /pose so the world_cloud_publisher inside ego_planner.launch
+       can transform depth clouds from camera_link to map. -->
+  <node pkg="ee478_localization"
+        type="odom_tf_broadcaster_node.py"
+        name="odom_tf_broadcaster" output="screen"/>
+
   <!-- 4. Mission agents (Phase 5 / 6 / 8 / 10). -->
   <node pkg="ee478_agent" type="command_interpreter_node.py"
         name="command_interpreter" output="screen">
@@ -73,6 +80,10 @@
         name="mission_fsm" output="screen">
     <param name="quiz_approach_back_m" value="2.0"/>
     <param name="gate_pass_forward_m"  value="1.5"/>
-    <param name="store_standoff_m"     value="1.5"/>
+    <param name="store_standoff_m"     value="3.0"/>
+    <!-- direct planner has no obstacle avoidance -> we hand-route
+         around the corridor walls. EGO does its own avoidance so
+         we should pass only the final goals through. -->
+    <param name="use_bypass" value="$(eval planner == 'direct')"/>
   </node>
 </launch>

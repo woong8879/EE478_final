@@ -9,5 +9,7 @@ catkin_install_python(PROGRAMS
   scripts/vio_bridge_node.py
   scripts/gt_vision_bridge_node.py
   scripts/landmark_anchor_publisher_node.py
+  scripts/odom_tf_broadcaster_node.py
+  scripts/camera_pose_publisher_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

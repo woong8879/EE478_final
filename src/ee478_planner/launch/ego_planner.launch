@@ -57,12 +57,20 @@
     <arg name="point4_x" value="0.0"/><arg name="point4_y" value="0.0"/><arg name="point4_z" value="0.0"/>
   </include>
 
-  <!-- Topic relays: upstream expects /drone_<id>_<topic>, we feed
-       from our own MAVROS/camera topics. -->
+  <!-- Topic relays into EGO's /drone_<id>_* namespace. With
+       pose_type=1 (depth + camera_pose), grid_map projects the depth
+       image in C++ using the camera intrinsics + the published camera
+       pose. We bypass the Python cloud transformer entirely (that
+       path drops 75 percent of frames due to do_transform_cloud being
+       slow). -->
   <node pkg="topic_tools" type="relay" name="relay_drone_$(arg drone_id)_odom"
         args="$(arg odom_topic) /drone_$(arg drone_id)_mavros/local_position/odom"/>
-  <node pkg="topic_tools" type="relay" name="relay_drone_$(arg drone_id)_cloud"
-        args="$(arg cloud_topic) /drone_$(arg drone_id)_iris_depth_camera/camera/depth/points"/>
+  <node pkg="topic_tools" type="relay" name="relay_drone_$(arg drone_id)_depth"
+        args="/iris_depth_camera_vio/camera/depth/image_raw /drone_$(arg drone_id)_pcl_render_node/depth"/>
+  <node pkg="ee478_localization" type="camera_pose_publisher_node.py"
+        name="camera_pose_publisher_drone_$(arg drone_id)" output="screen">
+    <param name="out_topic" value="/drone_$(arg drone_id)_pcl_render_node/camera_pose"/>
+  </node>
 
   <!-- Override a few grid_map params that the upstream defaults make
        too aggressive for the EE478 Gazebo world:
@@ -76,14 +84,28 @@
        - virtual_ground -1.0: keep the planner from inflating the
          ground (z=0) into the drone's hover band.
        - virtual_ceil 3.5: a bit above the drone-team world's roof. -->
+  <!-- pose_type=1 -> depth+pose grid_map. EGO projects the depth
+       image into the grid_map directly in C++ using fx/fy/cx/cy and
+       the live camera_pose stream. Much faster + no TF
+       synchronization issue compared to the cloud path. -->
+  <param name="drone_$(arg drone_id)_ego_planner_node/grid_map/pose_type"
+         value="1"/>
+  <!-- Aggressive min_ray_length: ignore everything within 1 m of
+       the camera so the drone's own body / prop wash / floor right
+       under the drone are NEVER ingested as obstacles. This is what
+       was causing EGO's "drone is in obstacle" error. -->
   <param name="drone_$(arg drone_id)_ego_planner_node/grid_map/min_ray_length"
-         value="0.5"/>
+         value="1.0"/>
   <param name="drone_$(arg drone_id)_ego_planner_node/grid_map/obstacles_inflation"
-         value="0.15"/>
+         value="0.10"/>
   <param name="drone_$(arg drone_id)_ego_planner_node/grid_map/virtual_ground"
          value="-1.0"/>
+  <!-- Tight virtual ceiling: EGO cannot route above this z. With
+       drone target hover at z=0.7 and a gate aperture roughly 1.5 m
+       tall, ceiling 1.3 m forces EGO to plan THROUGH the gate
+       rather than OVER its top bar (which sits ~1.5-2 m). -->
   <param name="drone_$(arg drone_id)_ego_planner_node/grid_map/virtual_ceil"
-         value="3.5"/>
+         value="1.3"/>
   <param name="drone_$(arg drone_id)_ego_planner_node/grid_map/ground_height"
          value="-1.0"/>
 

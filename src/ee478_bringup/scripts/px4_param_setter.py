@@ -21,23 +21,51 @@ from mavros_msgs.msg import ParamValue
 
 
 PARAMS = {
-    # Lower than the PX4 defaults (12 / 5 / 3 m/s) so that controller
-    # overshoot in the 2 m wide wall_3m gap stays under 0.3 m — earlier
-    # 1.8 m/s allowed up to 1 m lateral drift through the gap.
-    "MPC_XY_VEL_MAX":   0.3,   # max horizontal velocity (m/s) — slow
-                               # so ICP keeps frame-to-frame motion
-                               # within its registration window.
-    "MPC_XY_CRUISE":    0.2,   # cruise horizontal velocity (m/s)
-    "MPC_Z_VEL_MAX_UP": 0.7,   # max climb rate (m/s)
-    "MPC_Z_VEL_MAX_DN": 0.5,   # max descent rate (m/s)
-    "MPC_TKO_SPEED":    0.7,   # takeoff vertical speed (m/s)
-    "MPC_LAND_SPEED":   0.4,   # landing approach speed (m/s)
-    "MIS_TAKEOFF_ALT":  0.6,   # default mission takeoff altitude (m).
-                               # PX4 briefly enters AUTO.TAKEOFF on arm
-                               # then hands over to OFFBOARD; during the
-                               # handover the drone targets this value.
-                               # Old 1.7 m overshot ABOVE the gate top
-                               # bar (1.35 m). 0.6 m matches hover_z.
+    # MPC velocity caps. Need to be loose enough that EGO-Planner's
+    # commanded velocities aren't clipped (max ~1 m/s in our setup).
+    "MPC_XY_VEL_MAX":   1.5,   # max horizontal velocity (m/s)
+    "MPC_XY_CRUISE":    1.0,   # cruise horizontal velocity (m/s)
+    "MPC_Z_VEL_MAX_UP": 0.7,
+    "MPC_Z_VEL_MAX_DN": 0.5,
+    "MPC_TKO_SPEED":    0.7,
+    "MPC_LAND_SPEED":   0.4,
+    "MIS_TAKEOFF_ALT":  0.6,
+    # EKF vision-pose tuning. In sim the gt_vision_bridge feeds
+    # PERFECT ground-truth pose at 30 Hz, so we tell EKF to trust it
+    # absolutely. Without these tight noises, EKF rejects vision-pose
+    # samples after fast maneuvers (large delta vs IMU integration)
+    # and dead-reckons on IMU, diverging by several metres — exactly
+    # what made the drone "reach the cafe but land on ground at
+    # mavros-reported xy=(12.86, 1.61) when gazebo xy=(19.88, 2.73)".
+    "EKF2_EVP_NOISE":   0.02,  # vision position noise (m). very tight.
+    "EKF2_EVA_NOISE":   0.05,  # vision angle noise (rad). very tight.
+    "EKF2_EVV_NOISE":   0.05,  # vision velocity noise (m/s).
+    # GATE: how many sigmas off before EKF rejects. Larger => harder
+    # to reject vision-pose. 5 means up to 5*EVP_NOISE jump is still
+    # accepted (= 10 cm).
+    "EKF2_EV_GATE":     5.0,
+    # NOAID_TMOUT: how long EKF will fly without ANY aiding before
+    # giving up. 5 s instead of the default 1 s gives more grace
+    # during brief vision-pose stalls (e.g. our gt_bridge missing a
+    # sample). Param is microseconds.
+    "EKF2_NOAID_TOUT":  5000000,
+    # DISARM PREVENTION. PX4 auto-disarms if it thinks the drone has
+    # landed (LNDMC_TRIG_TIME after touchdown) or has been idle on
+    # the ground. In sim, any brief contact with the ground during
+    # transit triggers this and the whole mission falls over. We
+    # want the FSM in full control of when the drone arms/disarms.
+    "COM_DISARM_LAND":     -1.0,   # never auto-disarm after landing
+    "COM_DISARM_PRFLT":    -1.0,   # never auto-disarm pre-flight
+    "COM_DISARM_MAN":       0.0,   # disable joystick auto-disarm
+    # Land detection: bump trigger time to 30 s and lower required
+    # thrust so the drone doesn't get flagged as landed during
+    # transient low-z dips.
+    "LNDMC_TRIG_TIME":     30.0,
+    # Don't switch out of OFFBOARD just because the setpoint stream
+    # had a brief gap. EGO can stall for several seconds when its
+    # grid_map fills with phantom obstacles during fast manoeuvres;
+    # we want to keep OFFBOARD throughout.
+    "COM_OF_LOSS_T":       10.0,
 }
 
 

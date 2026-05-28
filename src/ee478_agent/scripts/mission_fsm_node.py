@@ -109,15 +109,27 @@ class MissionFSM:
         #   central wall at x=13 blocks y in [-2, 2]
         #   cafe wall    at x=16 blocks y in [1, 4]
         #   pharmacy wall at x=16 blocks y in [-4, -1]
-        # Two safe lateral corridors exist: y=+4.3 (between cafe wall
-        # top and outer y=+5 wall) and y=-4.3 (mirror). Pick based on
-        # whether the target store is on the +y or -y side.
-        self.bypass_y_pos = float(rospy.get_param("~bypass_y_pos",  4.3))
-        self.bypass_y_neg = float(rospy.get_param("~bypass_y_neg", -4.3))
-        # X coordinates of the two intermediate waypoints along the
-        # bypass corridor.
-        self.bypass_x_in  = float(rospy.get_param("~bypass_x_in",  8.0))
+        # The safest lateral corridor exists at y=+4.5 (centred in the
+        # 1 m gap between cafe wall top y=4 and outer wall y=5, giving
+        # 0.5 m clearance on BOTH sides) and y=-4.5 (mirror). y=4.3
+        # was tried first but only had 0.3 m to the cafe wall top —
+        # too tight against the wall the drone is trying to skip past.
+        self.bypass_y_pos = float(rospy.get_param("~bypass_y_pos",  4.5))
+        self.bypass_y_neg = float(rospy.get_param("~bypass_y_neg", -4.5))
+        # X of the two intermediate waypoints along the bypass corridor.
+        # bypass_x_in=6 means the drone climbs to the bypass altitude
+        # IMMEDIATELY past the gate, getting above the obstacle field
+        # (poles around x=6-10, max y of pole tips ~2.8) instead of
+        # threading through it.
+        self.bypass_x_in  = float(rospy.get_param("~bypass_x_in",  6.0))
         self.bypass_x_out = float(rospy.get_param("~bypass_x_out", 17.0))
+        # When an obstacle-aware planner (EGO) is downstream, we do
+        # NOT pre-route the drone through bypass corridors; the
+        # planner finds its own path. set ~use_bypass=false in that
+        # mode so NAV_STORE / RETURN_PATH publish only the high-level
+        # final goal. With the direct goal follower (no avoidance),
+        # ~use_bypass=true is required to navigate the corridor walls.
+        self.use_bypass = bool(rospy.get_param("~use_bypass", True))
         self.arrival_radius = float(
             rospy.get_param("~arrival_radius_m", 0.5))
         # Vertical arrival is checked separately because PX4's altitude
@@ -358,18 +370,25 @@ class MissionFSM:
             # Stand `standoff` in -x of the facade.
             sx, sy = s.position_world.x, s.position_world.y
             store_xy = (sx - self.store_standoff_m, sy)
-            # Bypass the corridor walls at x=13 and x=16 via the
-            # narrow gap between the cafe/pharmacy walls and the
-            # outer y=±5 walls.
-            by = self._bypass_y_for_store(sy)
-            waypoints = [
-                (self.bypass_x_in,  by),
-                (self.bypass_x_out, by),
-                store_xy,
-            ]
-            rospy.loginfo(
-                f"[mission_fsm] NAV_STORE waypoints (bypass y={by:.1f}): "
-                f"{waypoints}")
+            if self.use_bypass:
+                # Bypass the corridor walls at x=13 and x=16 via the
+                # narrow gap between cafe/pharmacy walls and the
+                # outer y=±5 walls. Used only with the direct
+                # planner; an obstacle-aware planner picks its own.
+                by = self._bypass_y_for_store(sy)
+                waypoints = [
+                    (self.bypass_x_in,  by),
+                    (self.bypass_x_out, by),
+                    store_xy,
+                ]
+                rospy.loginfo(
+                    f"[mission_fsm] NAV_STORE waypoints "
+                    f"(bypass y={by:.1f}): {waypoints}")
+            else:
+                waypoints = [store_xy]
+                rospy.loginfo(
+                    f"[mission_fsm] NAV_STORE direct (planner handles "
+                    f"avoidance): {waypoints}")
             self._enqueue_path(waypoints, after_state="SIGNATURE",
                                yaw=0.0)
         elif state == "FOLLOW_PATH":
@@ -396,17 +415,26 @@ class MissionFSM:
                                    yaw=math.pi)
                 return
             sy = s.position_world.y
-            by = self._bypass_y_for_store(sy)
             pk = sm.pickup_point
-            waypoints = [
-                (self.bypass_x_out, by),
-                (self.bypass_x_in,  by),
-                (outbound[0], outbound[1]),
-                (pk.x, pk.y),
-            ]
-            rospy.loginfo(
-                f"[mission_fsm] RETURN_PATH waypoints (bypass y={by:.1f}): "
-                f"{waypoints}")
+            if self.use_bypass:
+                by = self._bypass_y_for_store(sy)
+                waypoints = [
+                    (self.bypass_x_out, by),
+                    (self.bypass_x_in,  by),
+                    (outbound[0], outbound[1]),
+                    (pk.x, pk.y),
+                ]
+                rospy.loginfo(
+                    f"[mission_fsm] RETURN_PATH waypoints "
+                    f"(bypass y={by:.1f}): {waypoints}")
+            else:
+                waypoints = [
+                    (outbound[0], outbound[1]),
+                    (pk.x, pk.y),
+                ]
+                rospy.loginfo(
+                    f"[mission_fsm] RETURN_PATH direct (planner "
+                    f"handles avoidance): {waypoints}")
             self._enqueue_path(waypoints, after_state="DONE",
                                yaw=math.pi)
         elif state == "DONE":
