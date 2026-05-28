@@ -8,5 +8,6 @@ catkin_package(CATKIN_DEPENDS rospy)
 catkin_install_python(PROGRAMS
   scripts/vio_bridge_node.py
   scripts/gt_vision_bridge_node.py
+  scripts/landmark_anchor_publisher_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

@@ -23,4 +23,5 @@
   <exec_depend>tf2_ros</exec_depend>
   <exec_depend>vins</exec_depend>
   <exec_depend>loop_fusion</exec_depend>
+  <exec_depend>ee478_msgs</exec_depend>
 </package>
