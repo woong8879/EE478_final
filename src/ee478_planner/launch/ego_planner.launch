@@ -1,0 +1,88 @@
+<?xml version="1.0"?>
+<!--
+  EGO-Planner-V2 (HKUST FAST-Lab) wrapped for the EE478 stack.
+
+  Approach: include the upstream `advanced_param.xml` exactly as the
+  authors shipped it (dozens of grid_map / optimisation params, no
+  defaults) and just route OUR topics in by relaying them into the
+  upstream's expected names (/drone_<id>_<topic>).
+
+  Subscribes (via relay):
+    /mavros/local_position/odom              (nav_msgs/Odometry)
+    /iris_depth_camera/camera/depth/points   (sensor_msgs/PointCloud2)
+    /goal_with_id                            (quadrotor_msgs/GoalSet)
+                                              from ego_bridge
+
+  Publishes:
+    /drone_0_planning/pos_cmd                (quadrotor_msgs/PositionCommand)
+    /drone_0_planning/trajectory             (traj_utils/PolyTraj)
+-->
+<launch>
+  <arg name="drone_id"         default="0"/>
+  <arg name="odom_topic"       default="/mavros/local_position/odom"/>
+  <arg name="cloud_topic"      default="/iris_depth_camera_vio/camera/depth/points"/>
+  <arg name="map_size_x"       default="60.0"/>
+  <arg name="map_size_y"       default="20.0"/>
+  <arg name="map_size_z"       default="4.0"/>
+  <arg name="max_vel"          default="0.6"/>
+  <arg name="max_acc"          default="2.0"/>
+  <arg name="max_jer"          default="10.0"/>
+  <arg name="planning_horizon" default="3.0"/>
+
+  <!-- All planner / grid_map / optimisation params come from upstream. -->
+  <include file="$(find ego_planner)/launch/include/advanced_param.xml">
+    <arg name="drone_id"          value="$(arg drone_id)"/>
+    <arg name="map_size_x_"       value="$(arg map_size_x)"/>
+    <arg name="map_size_y_"       value="$(arg map_size_y)"/>
+    <arg name="map_size_z_"       value="$(arg map_size_z)"/>
+    <arg name="odometry_topic"    value="mavros/local_position/odom"/>
+    <arg name="camera_pose_topic" value="pcl_render_node/camera_pose"/>
+    <arg name="depth_topic"       value="pcl_render_node/depth"/>
+    <arg name="cloud_topic"       value="iris_depth_camera/camera/depth/points"/>
+    <arg name="cx" value="423.5"/>
+    <arg name="cy" value="239.5"/>
+    <arg name="fx" value="454.68"/>
+    <arg name="fy" value="454.68"/>
+    <arg name="max_vel"           value="$(arg max_vel)"/>
+    <arg name="max_acc"           value="$(arg max_acc)"/>
+    <arg name="max_jer"           value="$(arg max_jer)"/>
+    <arg name="planning_horizon"  value="$(arg planning_horizon)"/>
+    <arg name="use_multitopology_trajs" value="true"/>
+    <arg name="flight_type"       value="1"/>
+    <arg name="point_num"         value="0"/>
+    <arg name="point0_x" value="0.0"/><arg name="point0_y" value="0.0"/><arg name="point0_z" value="0.0"/>
+    <arg name="point1_x" value="0.0"/><arg name="point1_y" value="0.0"/><arg name="point1_z" value="0.0"/>
+    <arg name="point2_x" value="0.0"/><arg name="point2_y" value="0.0"/><arg name="point2_z" value="0.0"/>
+    <arg name="point3_x" value="0.0"/><arg name="point3_y" value="0.0"/><arg name="point3_z" value="0.0"/>
+    <arg name="point4_x" value="0.0"/><arg name="point4_y" value="0.0"/><arg name="point4_z" value="0.0"/>
+  </include>
+
+  <!-- Topic relays: upstream expects /drone_<id>_<topic>, we feed
+       from our own MAVROS/camera topics. -->
+  <node pkg="topic_tools" type="relay" name="relay_drone_$(arg drone_id)_odom"
+        args="$(arg odom_topic) /drone_$(arg drone_id)_mavros/local_position/odom"/>
+  <node pkg="topic_tools" type="relay" name="relay_drone_$(arg drone_id)_cloud"
+        args="$(arg cloud_topic) /drone_$(arg drone_id)_iris_depth_camera/camera/depth/points"/>
+
+  <!-- traj_server: trajectory polynomial -> high-rate PositionCommand. -->
+  <node pkg="ego_planner" name="drone_$(arg drone_id)_traj_server"
+        type="traj_server" output="screen">
+    <remap from="position_cmd"        to="/drone_$(arg drone_id)_planning/pos_cmd"/>
+    <remap from="~planning/trajectory" to="/drone_$(arg drone_id)_planning/trajectory"/>
+    <remap from="heartbeat"            to="/drone_$(arg drone_id)_traj_server/heartbeat"/>
+    <param name="traj_server/time_forward" value="1.0"/>
+  </node>
+
+  <!-- ego_bridge: agent goal <-> EGO; EGO pos_cmd -> offboard. -->
+  <node pkg="ee478_planner" name="ego_bridge"
+        type="ego_bridge_node.py" output="screen">
+    <param name="drone_id"         value="$(arg drone_id)"/>
+    <param name="goal_in_topic"    value="/next_goal"/>
+    <param name="goal_out_topic"   value="/goal_with_id"/>
+    <param name="cmd_in_topic"     value="/drone_$(arg drone_id)_planning/pos_cmd"/>
+    <param name="cmd_out_topic"    value="/offboard/cmd_raw"/>
+    <param name="arrival_radius_m" value="0.6"/>
+    <param name="tick_hz"          value="20.0"/>
+    <param name="resend_period_s"  value="1.0"/>
+  </node>
+</launch>
