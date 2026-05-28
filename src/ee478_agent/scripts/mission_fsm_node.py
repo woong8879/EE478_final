@@ -75,6 +75,12 @@ class MissionFSM:
         # while waiting for the quiz solver to choose a lane.
         self.quiz_approach_back_m = float(rospy.get_param(
             "~quiz_approach_back_m", 2.0))
+        # How far in front of the gate to ALIGN laterally onto the
+        # chosen lane. Without an explicit align waypoint the drone
+        # would fly the (approach -> past_gate) leg diagonally and
+        # clip the gate post sitting at gate_x.
+        self.lane_align_back_m = float(rospy.get_param(
+            "~lane_align_back_m", 0.7))
         # how far PAST the gate to fly so we're committed to a lane
         # before turning to the store. Same offset reused on return.
         self.gate_pass_forward_m = float(rospy.get_param(
@@ -95,6 +101,23 @@ class MissionFSM:
         self.pending_goal_xyz = None     # PoseStamped.position we last sent
         self.pending_min_dxy = float("inf")  # closest xy approach since publish
         self.pending_min_dz = float("inf")
+        # Waypoint queue + continuation. _enqueue_path() fills these.
+        self.nav_queue = []
+        self.nav_after_state = None
+        self.nav_yaw = 0.0
+        # World layout corridors (see ee478_project_simple.world):
+        #   central wall at x=13 blocks y in [-2, 2]
+        #   cafe wall    at x=16 blocks y in [1, 4]
+        #   pharmacy wall at x=16 blocks y in [-4, -1]
+        # Two safe lateral corridors exist: y=+4.3 (between cafe wall
+        # top and outer y=+5 wall) and y=-4.3 (mirror). Pick based on
+        # whether the target store is on the +y or -y side.
+        self.bypass_y_pos = float(rospy.get_param("~bypass_y_pos",  4.3))
+        self.bypass_y_neg = float(rospy.get_param("~bypass_y_neg", -4.3))
+        # X coordinates of the two intermediate waypoints along the
+        # bypass corridor.
+        self.bypass_x_in  = float(rospy.get_param("~bypass_x_in",  8.0))
+        self.bypass_x_out = float(rospy.get_param("~bypass_x_out", 17.0))
         self.arrival_radius = float(
             rospy.get_param("~arrival_radius_m", 0.5))
         # Vertical arrival is checked separately because PX4's altitude
@@ -232,6 +255,23 @@ class MissionFSM:
                 return s
         return None
 
+    def _bypass_y_for_store(self, sy):
+        """Choose the +y or -y bypass corridor to use based on the
+        target store's y. Cafe (y=+2.5) -> use +y corridor; pharmacy
+        (y=-2.5) -> use -y. Burger (y=0) -> default to +y."""
+        return self.bypass_y_pos if sy >= 0 else self.bypass_y_neg
+
+    def _enqueue_path(self, waypoints, after_state, yaw=0.0):
+        """Queue a list of (x, y) waypoints; transition to
+        `after_state` once the last one is reached. Each waypoint is
+        published in sequence as the previous one's arrival is
+        detected. yaw is the heading commanded at every waypoint."""
+        with self.lock:
+            self.nav_queue = [tuple(w) for w in waypoints]
+            self.nav_after_state = after_state
+            self.nav_yaw = yaw
+        self._set_state("FOLLOW_PATH")
+
     def _set_state(self, s):
         with self.lock:
             if s != self.state:
@@ -281,13 +321,26 @@ class MissionFSM:
                         "[mission_fsm] at approach but no chosen gate "
                         "yet; holding")
                 else:
-                    self._set_state("THROUGH_QUIZ")
+                    self._set_state("ALIGN_LANE")
+        elif state == "ALIGN_LANE":
+            # Shift LATERALLY to the chosen-lane y BEFORE the gate so
+            # the THROUGH leg is a straight forward pass. Without
+            # this, the diagonal from (approach, y=0) to (past_gate,
+            # lane_y) clips the gate post at x=gate_x.
+            ax = qp.pose.position.x - self.lane_align_back_m
+            ay = qp.pose.position.y
+            self._publish_goal(ax, ay, label=2)
+            self._set_state("WAIT_ALIGN_LANE")
+        elif state == "WAIT_ALIGN_LANE":
+            if self._pending_reached():
+                self._clear_pending()
+                self._set_state("THROUGH_QUIZ")
         elif state == "THROUGH_QUIZ":
             # Fly forward through the chosen gate, ending up
             # `gate_pass_forward_m` past it.
             gx = qp.pose.position.x + self.gate_pass_forward_m
             gy = qp.pose.position.y
-            self._publish_goal(gx, gy, label=2)
+            self._publish_goal(gx, gy, label=3)
             self._set_state("WAIT_THROUGH_QUIZ")
         elif state == "WAIT_THROUGH_QUIZ":
             if self._pending_reached():
@@ -301,16 +354,26 @@ class MissionFSM:
                     f"[mission_fsm] target {tcat} not in semantic map "
                     f"yet; waiting")
                 return
-            # stand `standoff` in -x of the facade. Facades face -x in
-            # our world (cafe/burger/pharmacy at x=21, rotated -1.57).
+            # Facades face -x in our world (stores at x=21, yaw=-1.57).
+            # Stand `standoff` in -x of the facade.
             sx, sy = s.position_world.x, s.position_world.y
-            self._publish_goal(sx - self.store_standoff_m, sy,
-                               label=3)
-            self._set_state("WAIT_NAV_STORE")
-        elif state == "WAIT_NAV_STORE":
-            if self._pending_reached():
-                self._clear_pending()
-                self._set_state("SIGNATURE")
+            store_xy = (sx - self.store_standoff_m, sy)
+            # Bypass the corridor walls at x=13 and x=16 via the
+            # narrow gap between the cafe/pharmacy walls and the
+            # outer y=±5 walls.
+            by = self._bypass_y_for_store(sy)
+            waypoints = [
+                (self.bypass_x_in,  by),
+                (self.bypass_x_out, by),
+                store_xy,
+            ]
+            rospy.loginfo(
+                f"[mission_fsm] NAV_STORE waypoints (bypass y={by:.1f}): "
+                f"{waypoints}")
+            self._enqueue_path(waypoints, after_state="SIGNATURE",
+                               yaw=0.0)
+        elif state == "FOLLOW_PATH":
+            self._tick_follow_path()
         elif state == "SIGNATURE":
             s = self._find_target_store()
             sid = s.store_id if s is not None else 0
@@ -318,35 +381,63 @@ class MissionFSM:
             self._set_state("WAIT_SIGNATURE")
         elif state == "WAIT_SIGNATURE":
             if sig_done:
-                self._set_state("RETURN_GATE")
-        elif state == "RETURN_GATE":
-            # Fly back through the SAME chosen gate (no quiz this time).
-            if outbound is None:
+                self._set_state("RETURN_PATH")
+        elif state == "RETURN_PATH":
+            # Reverse the NAV_STORE bypass, drop through outbound gate,
+            # land at pickup. All one path so we use the same queue.
+            s = self._find_target_store()
+            if s is None or outbound is None or sm is None:
                 rospy.logwarn(
-                    "[mission_fsm] no outbound gate memorised; "
-                    "returning direct to pickup")
-                self._set_state("RETURN_PICKUP")
+                    "[mission_fsm] missing context for return; "
+                    "jumping straight to pickup")
+                px = sm.pickup_point.x if sm is not None else 0.0
+                py = sm.pickup_point.y if sm is not None else 0.0
+                self._enqueue_path([(px, py)], after_state="DONE",
+                                   yaw=math.pi)
                 return
-            self._publish_goal(outbound[0], outbound[1],
-                               yaw=math.pi, label=4)
-            self._set_state("WAIT_RETURN_GATE")
-        elif state == "WAIT_RETURN_GATE":
-            if self._pending_reached():
-                self._clear_pending()
-                self._set_state("RETURN_PICKUP")
-        elif state == "RETURN_PICKUP":
-            pk = sm.pickup_point if sm is not None else None
-            px = pk.x if pk is not None else 0.0
-            py = pk.y if pk is not None else 0.0
-            self._publish_goal(px, py, yaw=math.pi, label=5)
-            self._set_state("WAIT_RETURN_PICKUP")
-        elif state == "WAIT_RETURN_PICKUP":
-            if self._pending_reached():
-                self._clear_pending()
-                self._set_state("DONE")
+            sy = s.position_world.y
+            by = self._bypass_y_for_store(sy)
+            pk = sm.pickup_point
+            waypoints = [
+                (self.bypass_x_out, by),
+                (self.bypass_x_in,  by),
+                (outbound[0], outbound[1]),
+                (pk.x, pk.y),
+            ]
+            rospy.loginfo(
+                f"[mission_fsm] RETURN_PATH waypoints (bypass y={by:.1f}): "
+                f"{waypoints}")
+            self._enqueue_path(waypoints, after_state="DONE",
+                               yaw=math.pi)
         elif state == "DONE":
             rospy.loginfo_throttle(
                 10.0, "[mission_fsm] MISSION DONE")
+
+    def _tick_follow_path(self):
+        with self.lock:
+            queue = list(self.nav_queue)
+            after = self.nav_after_state
+            yaw = self.nav_yaw
+            pending = self.pending_goal_xyz
+        if not queue:
+            if after is not None:
+                self._set_state(after)
+            return
+        if pending is None:
+            # Publish next waypoint.
+            wx, wy = queue[0]
+            self._publish_goal(wx, wy, yaw=yaw, label=len(queue))
+            return
+        if self._pending_reached():
+            self._clear_pending()
+            with self.lock:
+                if self.nav_queue:
+                    done = self.nav_queue.pop(0)
+                else:
+                    done = None
+            rospy.loginfo(
+                f"[mission_fsm] reached waypoint {done}; "
+                f"{len(self.nav_queue)} left")
 
 
 if __name__ == "__main__":
