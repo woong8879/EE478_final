@@ -47,7 +47,7 @@
     <arg name="max_acc"           value="$(arg max_acc)"/>
     <arg name="max_jer"           value="$(arg max_jer)"/>
     <arg name="planning_horizon"  value="$(arg planning_horizon)"/>
-    <arg name="use_multitopology_trajs" value="true"/>
+    <arg name="use_multitopology_trajs" value="false"/>
     <arg name="flight_type"       value="1"/>
     <arg name="point_num"         value="0"/>
     <arg name="point0_x" value="0.0"/><arg name="point0_y" value="0.0"/><arg name="point0_z" value="0.0"/>
@@ -63,6 +63,29 @@
         args="$(arg odom_topic) /drone_$(arg drone_id)_mavros/local_position/odom"/>
   <node pkg="topic_tools" type="relay" name="relay_drone_$(arg drone_id)_cloud"
         args="$(arg cloud_topic) /drone_$(arg drone_id)_iris_depth_camera/camera/depth/points"/>
+
+  <!-- Override a few grid_map params that the upstream defaults make
+       too aggressive for the EE478 Gazebo world:
+       - min_ray_length 0.5: ignore points within 0.5 m of the camera
+         so the drone's own body / rotor blur isn't ingested as an
+         obstacle right where the drone is sitting.
+       - obstacles_inflation 0.15: tighter than the upstream 0.30 so
+         the drone's start cell does NOT register as occupied (which
+         was triggering the A* "start point outside map region"
+         failure that stalled the first traj generation).
+       - virtual_ground -1.0: keep the planner from inflating the
+         ground (z=0) into the drone's hover band.
+       - virtual_ceil 3.5: a bit above the drone-team world's roof. -->
+  <param name="drone_$(arg drone_id)_ego_planner_node/grid_map/min_ray_length"
+         value="0.5"/>
+  <param name="drone_$(arg drone_id)_ego_planner_node/grid_map/obstacles_inflation"
+         value="0.15"/>
+  <param name="drone_$(arg drone_id)_ego_planner_node/grid_map/virtual_ground"
+         value="-1.0"/>
+  <param name="drone_$(arg drone_id)_ego_planner_node/grid_map/virtual_ceil"
+         value="3.5"/>
+  <param name="drone_$(arg drone_id)_ego_planner_node/grid_map/ground_height"
+         value="-1.0"/>
 
   <!-- traj_server: trajectory polynomial -> high-rate PositionCommand. -->
   <node pkg="ego_planner" name="drone_$(arg drone_id)_traj_server"
