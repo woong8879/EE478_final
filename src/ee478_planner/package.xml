@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>ee478_planner</name>
+  <version>0.1.0</version>
+  <description>
+    Bridges between the EGO-Planner-V2 trajectory optimiser and the
+    rest of the EE478 stack: agent /next_goal -> EGO GoalSet,
+    EGO PositionCommand -> PX4 setpoint_raw/local. Also hosts the
+    offboard_controller that streams setpoints to MAVROS.
+  </description>
+  <maintainer email="woongrae@kaist.ac.kr">Woongrae Bae</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  <build_depend>rospy</build_depend>
+
+  <exec_depend>rospy</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>mavros</exec_depend>
+  <exec_depend>mavros_msgs</exec_depend>
+  <exec_depend>ee478_msgs</exec_depend>
+  <exec_depend>quadrotor_msgs</exec_depend>
+  <exec_depend>ego_planner</exec_depend>
+</package>
