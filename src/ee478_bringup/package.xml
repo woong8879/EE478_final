@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>ee478_bringup</name>
+  <version>0.1.0</version>
+  <description>Launch files for the EE478 final-project drone stack (sim + real).</description>
+  <maintainer email="woongrae@kaist.ac.kr">Woongrae Bae</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  <build_depend>rospy</build_depend>
+
+  <exec_depend>rospy</exec_depend>
+  <exec_depend>mavros</exec_depend>
+  <exec_depend>mavros_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+
+  <exec_depend>ee478_localization</exec_depend>
+  <exec_depend>ee478_planner</exec_depend>
+  <exec_depend>ee478_perception</exec_depend>
+  <exec_depend>ee478_agent</exec_depend>
+  <exec_depend>vins</exec_depend>
+  <exec_depend>ego_planner</exec_depend>
+</package>

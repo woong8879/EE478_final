@@ -1,0 +1,71 @@
+%YAML:1.0
+# VINS-Fusion config for the EE478 final-project drone in PX4 SITL.
+# Mono camera + IMU. Real-drone build will swap the topics and the
+# camera intrinsics (in iris_cam0.yaml) and keep this file otherwise
+# identical.
+
+#common parameters
+imu: 1
+num_of_cam: 1
+
+imu_topic: "/mavros/imu/data"
+image0_topic: "/iris_depth_camera/camera/rgb/image_raw"
+image1_topic: ""
+output_path: "/tmp/vins_output/"
+
+cam0_calib: "iris_cam0.yaml"
+cam1_calib: ""
+image_width: 848
+image_height: 480
+
+# Extrinsic IMU<-camera. We use estimate_extrinsic=2 (no initial
+# guess; solve from scratch) so VINS converges to whatever transform
+# matches our static TF chain. The base_link->camera_link static TF
+# in px4_sitl.launch is:
+#   x=0.10 y=0 z=0.05  yaw=-pi/2 pitch=0 roll=-pi/2
+# i.e. camera-optical (x-right, y-down, z-forward) sits 10 cm forward
+# / 5 cm up of base_link (the IMU body frame in MAVROS). The matrix
+# below encodes that rotation and translation as body_T_cam0.
+estimate_extrinsic: 0
+body_T_cam0: !!opencv-matrix
+   rows: 4
+   cols: 4
+   dt: d
+   data: [ 0.0, -1.0,  0.0, 0.10,
+           0.0,  0.0, -1.0, 0.00,
+           1.0,  0.0,  0.0, 0.05,
+           0.0,  0.0,  0.0, 1.00]
+
+#Multiple thread support
+multiple_thread: 1
+
+#feature tracker parameters
+max_cnt: 150            # max feature number in feature tracking
+min_dist: 30            # min distance between two features
+freq: 10                # publish tracking result @ 10 Hz
+F_threshold: 1.0        # ransac threshold (pixel)
+show_track: 0           # publish tracking image as topic (set 1 to debug)
+flow_back: 1            # reverse optical flow to remove outliers
+
+#optimization parameters
+max_solver_time: 0.04   # max solver iteration time (ms), to guarantee real time
+max_num_iterations: 8   # max solver iterations
+keyframe_parallax: 10.0 # keyframe selection threshold (pixel)
+
+#imu parameters       The more accurate parameters you provide, the better performance
+# PX4-SITL IMU has small but nonzero noise/bias. Numbers below are
+# conservative; on the real Pixhawk we'd tune from a static log.
+acc_n: 0.10            # accelerometer measurement noise standard deviation
+gyr_n: 0.01            # gyroscope measurement noise standard deviation
+acc_w: 0.001           # accelerometer bias random work noise standard deviation
+gyr_w: 0.0001          # gyroscope bias random work noise standard deviation
+g_norm: 9.81007        # gravity magnitude
+
+#unsynchronization parameters
+estimate_td: 0          # online estimate time offset between camera and imu
+td: 0.0                 # initial value of time offset
+
+#loop closure parameters
+load_previous_pose_graph: 0        # load and reuse previous pose graph; load from 'pose_graph_save_path'
+pose_graph_save_path: "/tmp/vins_output/pose_graph/"
+save_image: 0                      # save image in pose graph for visualization prupose; you can close this function by setting 0

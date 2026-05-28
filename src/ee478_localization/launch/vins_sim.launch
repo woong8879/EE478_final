@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<!--
+  Bring up VINS-Fusion (mono + IMU) for the PX4 SITL iris_depth_camera.
+  Subscribes:
+    /iris_depth_camera/camera/rgb/image_raw   (sensor_msgs/Image)
+    /mavros/imu/data                          (sensor_msgs/Imu)
+
+  Publishes:
+    /vins_estimator/odometry                  (nav_msgs/Odometry)
+    /vins_estimator/imu_propagate             (nav_msgs/Odometry, high-rate)
+    /loop_fusion/pose_graph_path              (nav_msgs/Path, loop-closure-corrected)
+-->
+<launch>
+  <arg name="config_file"
+       default="$(find ee478_localization)/config/iris_vins_sim.yaml"/>
+
+  <node pkg="vins" type="vins_node" name="vins_estimator"
+        args="$(arg config_file)" output="screen"/>
+
+  <node pkg="loop_fusion" type="loop_fusion_node" name="loop_fusion"
+        args="$(arg config_file)" output="screen"/>
+</launch>

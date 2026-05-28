@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<!--
+  Phase 1 verification: PX4 SITL + Gazebo + VINS-Fusion + vio_bridge.
+  No planner, no agent. The goal here is to confirm that:
+    - PX4 is up, MAVROS connected
+    - VINS-Fusion publishes /vins_estimator/odometry
+    - vio_bridge re-publishes /mavros/vision_pose/pose at ~30 Hz
+    - The covariance + jump safety gates work (no spurious teleports)
+
+  Usage:
+    source ~/EE478/final_project_ws/setup_env.sh
+    roslaunch ee478_bringup vio_only.launch
+-->
+<launch>
+  <include file="$(find ee478_bringup)/launch/px4_sitl.launch"/>
+
+  <include file="$(find ee478_localization)/launch/vins_sim.launch"/>
+
+  <node pkg="ee478_localization" type="vio_bridge_node.py"
+        name="vio_bridge" output="screen">
+    <param name="vo_topic"            value="/vins_estimator/odometry"/>
+    <param name="loop_topic"          value=""/>
+    <param name="landmark_anchor_topic" value="/landmark_anchor_pose"/>
+    <param name="vision_pose_topic"   value="/mavros/vision_pose/pose"/>
+    <param name="rate_hz"             value="30.0"/>
+    <param name="max_cov_m2"          value="1.0"/>
+    <param name="max_jump_m"          value="0.5"/>
+    <param name="anchor_blend_rate"   value="0.2"/>
+  </node>
+</launch>

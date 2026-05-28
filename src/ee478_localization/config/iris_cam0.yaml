@@ -1,0 +1,18 @@
+%YAML:1.0
+# Pinhole intrinsics for the iris_depth_camera Gazebo RGB camera
+# (horizontal_fov=1.5009831567 rad, 848x480). On the real RealSense
+# D435/D455 these get replaced with factory calibration.
+model_type: PINHOLE
+camera_name: cam0
+image_width: 848
+image_height: 480
+distortion_parameters:
+   k1: 0.0
+   k2: 0.0
+   p1: 0.0
+   p2: 0.0
+projection_parameters:
+   fx: 454.68
+   fy: 454.68
+   cx: 423.5
+   cy: 239.5
