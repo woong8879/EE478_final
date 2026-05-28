@@ -1,0 +1,13 @@
+build/
+devel/
+install/
+*.pyc
+__pycache__/
+.catkin_tools/
+*.bag
+*.log
+*.engine
+*.onnx
+runs/
+src/ee478_perception/dataset/
+HW4/
