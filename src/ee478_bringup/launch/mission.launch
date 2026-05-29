@@ -58,12 +58,12 @@
         type="odom_tf_broadcaster_node.py"
         name="odom_tf_broadcaster" output="screen"/>
 
-  <!-- 3c. VINS-Fusion pre-flight excitation (only when VINS is the
-       VIO source). After takeoff, this node injects a 5 s lissajous
-       on /next_goal so VINS gets 3-axis motion data and converges
-       on metric scale BEFORE the mission proper starts. The FSM
-       waits for /vins_excitation/done before leaving the takeoff
-       hover. -->
+  <!-- VINS path: pre-flight excitation + SIM-ONLY landmark anchor.
+       Both are vestiges of the mono+IMU scale-init effort and are
+       NOT used by the RTAB-Map RGBD path (which is what the real
+       drone will run). They stay in the tree so the VINS launch
+       still works for reference; mission.launch leaves them OFF for
+       the rtabmap and gt arms. -->
   <group if="$(eval vio_source == 'vins')">
     <node pkg="ee478_localization" type="vins_excitation_node.py"
           name="vins_excitation" output="screen">
@@ -72,10 +72,6 @@
       <param name="amplitude_z_m"          value="0.15"/>
       <param name="center_z_m"             value="0.7"/>
     </node>
-    <!-- SIM-ONLY landmark anchor injection at 1 Hz. Stands in for
-         the real-drone perception pipeline. Without this, VINS drift
-         accumulates unchecked and the drone navigates by stale
-         vision_pose. -->
     <node pkg="ee478_localization" type="sim_landmark_anchor_node.py"
           name="sim_landmark_anchor" output="screen">
       <param name="rate_hz" value="1.0"/>

@@ -48,6 +48,24 @@
       <param name="anchor_blend_rate" value="0.2"/>
     </node>
   </group>
+  <!-- RTAB-Map RGBD-Inertial Odometry. Scale comes from depth (no
+       mono+IMU init dance); same exact code runs on the real Jetson
+       once the camera topics point at the RealSense D435i. NO GT
+       bootstrap in this path. -->
+  <group if="$(eval vio_source == 'rtabmap')">
+    <include file="$(find ee478_localization)/launch/rtabmap_sim.launch"/>
+    <node pkg="ee478_localization" type="vio_bridge_node.py"
+          name="vio_bridge" output="screen">
+      <param name="vo_topic"          value="/rtabmap/odom"/>
+      <param name="loop_topic"        value=""/>
+      <param name="vision_pose_topic" value="/mavros/vision_pose/pose"/>
+      <param name="rate_hz"           value="30.0"/>
+      <param name="max_cov_m2"        value="1.0"/>
+      <param name="max_jump_m"        value="0.5"/>
+      <param name="anchor_blend_rate" value="0.2"/>
+      <param name="bootstrap_enabled" value="false"/>
+    </node>
+  </group>
 
   <!-- 3. Planner -->
   <group if="$(eval planner == 'direct')">
