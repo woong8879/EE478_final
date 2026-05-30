@@ -1,0 +1,48 @@
+<?xml version="1.0"?>
+<!--
+  Real-drone PX4 + MAVROS bringup.
+
+  Assumes:
+    * The Pixhawk is wired to the Jetson over UART (default
+      /dev/ttyTHS1 @ 921600). Use `fcu_url` to override
+      (e.g. `serial:///dev/ttyUSB0:921600`, or a UDP URL if you are
+      bench-testing via a sim-bridge).
+    * The static base_link -> camera_link TF is published by the
+      same px4_sitl.launch's tf_assist line in sim; on the real
+      drone we publish it here directly from the measured mounting
+      offset of the RealSense.
+
+  Does NOT:
+    * Spawn Gazebo, PX4 SITL, gt_vision_bridge, or any sim model.
+    * Auto-arm. Operator arms via QGroundControl or RC after
+      verifying RC failsafe + battery.
+-->
+<launch>
+  <arg name="fcu_url"      default="serial:///dev/ttyTHS1:921600"/>
+  <arg name="gcs_url"      default=""/>
+  <arg name="tgt_system"   default="1"/>
+  <arg name="tgt_component" default="1"/>
+
+  <!-- MAVROS -->
+  <include file="$(find mavros)/launch/node.launch">
+    <arg name="pluginlists_yaml"
+         value="$(find mavros)/launch/px4_pluginlists.yaml"/>
+    <arg name="config_yaml"
+         value="$(find mavros)/launch/px4_config.yaml"/>
+    <arg name="fcu_url"        value="$(arg fcu_url)"/>
+    <arg name="gcs_url"        value="$(arg gcs_url)"/>
+    <arg name="tgt_system"     value="$(arg tgt_system)"/>
+    <arg name="tgt_component"  value="$(arg tgt_component)"/>
+    <arg name="log_output"     value="screen"/>
+  </include>
+
+  <!-- Static base_link -> camera_link. Measured at mount install.
+       Override at launch:
+         roslaunch ... base_to_cam_tf:="0.10 0 0.05 0 0 0"
+  -->
+  <arg name="base_to_cam_tf"
+       default="0.10 0 0.05 -1.5707963 0 -1.5707963"/>
+  <node pkg="tf2_ros" type="static_transform_publisher"
+        name="base_to_camera_link"
+        args="$(arg base_to_cam_tf) base_link camera_link"/>
+</launch>

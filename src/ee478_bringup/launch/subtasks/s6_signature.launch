@@ -1,31 +1,34 @@
 <?xml version="1.0"?>
 <!--
-  Sub-task 6: SIGNATURE MOVE (yaw spin in place)
-  ==============================================
-  Drone is hovering at hover_z. We trigger signature_move with a
-  fixed store_id (the actual id is just a label for /goal_reached,
-  it doesn't change the motion). signature_move publishes the
-  in-place yaw-spin waypoints to /next_goal; ego_bridge or
-  direct_goal_follower carries them through.
+  Sub-task 6: SIGNATURE MOVE (yaw spin in place, NO z change)
+  ===========================================================
+  Sim:
+    roslaunch ee478_bringup s6_signature.launch platform:=sim
+  Real (operator arms manually):
+    roslaunch ee478_bringup s6_signature.launch platform:=real \
+        spin_dyaw_deg:=90.0       # smaller first spin
 
-  Test:
-    roslaunch ee478_bringup s6_signature.launch
-    # in another shell after the drone has finished takeoff:
+  After takeoff in either platform:
     rostopic pub -1 /mission/signature_trigger std_msgs/Int32 "data: 7"
-    rostopic echo /mission/signature_done
-    # expect: data: True  after ~10-20 s of yaw rotation
+    rostopic echo /mission/signature_done   # expect True
 -->
 <launch>
-  <arg name="vio_source" default="gt"/>
-  <arg name="hover_z"    default="0.7"/>
+  <arg name="platform"      default="sim"/>
+  <arg name="vio_source"    default="gt"/>
+  <arg name="hover_z"
+       default="$(eval 0.5 if arg('platform') == 'real' else 0.7)"/>
+  <arg name="spin_dyaw_deg"
+       default="$(eval 90.0 if arg('platform') == 'real' else 180.0)"/>
+  <arg name="fcu_url"
+       default="serial:///dev/ttyTHS1:921600"/>
 
   <include file="$(find ee478_bringup)/launch/subtasks/s1_takeoff.launch">
+    <arg name="platform"   value="$(arg platform)"/>
     <arg name="vio_source" value="$(arg vio_source)"/>
     <arg name="hover_z"    value="$(arg hover_z)"/>
+    <arg name="fcu_url"    value="$(arg fcu_url)"/>
   </include>
 
-  <!-- direct_goal_follower so the signature waypoints actually drive
-       the drone (no EGO needed for an in-place spin). -->
   <node pkg="ee478_planner" type="direct_goal_follower.py"
         name="direct_goal_follower" output="screen">
     <param name="rate_hz"          value="20.0"/>
@@ -34,7 +37,7 @@
 
   <node pkg="ee478_agent" type="signature_move_node.py"
         name="signature_move" output="screen">
-    <param name="spin_dyaw_deg" value="180.0"/>
+    <param name="spin_dyaw_deg" value="$(arg spin_dyaw_deg)"/>
     <param name="hover_z"       value="$(arg hover_z)"/>
   </node>
 </launch>

@@ -1,35 +1,66 @@
 <?xml version="1.0"?>
 <!--
   Sub-task 1: TAKEOFF
-  =====================
-  Brings up PX4 SITL + VIO + offboard_controller and lets the drone
-  arm + ascend to hover_z. NO mission FSM, NO planner, NO perception.
-  Drone just sits at hover.
+  ===================
+  platform:=sim   ->  PX4 SITL + gazebo + GT vision bridge
+  platform:=real  ->  PX4 UART + RealSense (NO GT, NO auto-arm)
 
-  Pass criterion: gazebo z > 0.6 within 30 s and stays armed +
-  OFFBOARD for at least 5 s.
+  Pass criterion: drone z > 0.6 within 30 s and stays armed + OFFBOARD
+  for at least 5 s.
 
-  Test:
-    roslaunch ee478_bringup s1_takeoff.launch
-    # in another shell:
-    rostopic echo /mavros/local_position/pose | grep -A3 position
+  Sim test:
+    roslaunch ee478_bringup s1_takeoff.launch platform:=sim
+
+  Real-drone test (operator arms manually via QGC; this stack just
+  publishes setpoints so PX4 can flip into OFFBOARD when armed):
+    roslaunch ee478_bringup s1_takeoff.launch \
+        platform:=real fcu_url:=serial:///dev/ttyTHS1:921600
+    # in QGC: ARM, then switch flight mode to OFFBOARD.
+    # The drone will ascend to takeoff_alt and hover.
+
+  SAFETY (real drone):
+    * auto_arm is FORCED FALSE on platform:=real. Operator arms.
+    * takeoff_alt defaults to 0.5 m on real, 0.7 on sim.
+    * Always verify RC failsafe, battery, and clear test area first.
 -->
 <launch>
+  <arg name="platform"   default="sim"/>
   <arg name="vio_source" default="gt"/>
-  <arg name="hover_z"    default="0.7"/>
+  <arg name="hover_z"    default="$(eval 0.5 if arg('platform') == 'real' else 0.7)"/>
+  <arg name="auto_arm"   default="$(eval arg('platform') == 'sim')"/>
+  <arg name="fcu_url"
+       default="serial:///dev/ttyTHS1:921600"/>
 
-  <include file="$(find ee478_bringup)/launch/px4_sitl.launch">
-    <arg name="vehicle" value="iris_depth_camera_vio"/>
-  </include>
-
-  <group if="$(eval vio_source == 'gt')">
-    <node pkg="ee478_localization" type="gt_vision_bridge_node.py"
-          name="gt_vision_bridge" output="screen">
-      <param name="target_model" value="iris_depth_camera_vio"/>
-      <param name="rate_hz"      value="30.0"/>
-    </node>
+  <!-- ============ SIM ============ -->
+  <group if="$(eval platform == 'sim')">
+    <include file="$(find ee478_bringup)/launch/px4_sitl.launch">
+      <arg name="vehicle" value="iris_depth_camera_vio"/>
+    </include>
+    <group if="$(eval vio_source == 'gt')">
+      <node pkg="ee478_localization" type="gt_vision_bridge_node.py"
+            name="gt_vision_bridge" output="screen">
+        <param name="target_model" value="iris_depth_camera_vio"/>
+        <param name="rate_hz"      value="30.0"/>
+      </node>
+    </group>
+    <group if="$(eval vio_source == 'rtabmap')">
+      <include file="$(find ee478_localization)/launch/rtabmap_sim.launch"/>
+      <node pkg="ee478_localization" type="vio_bridge_node.py"
+            name="vio_bridge" output="screen">
+        <param name="vo_topic"          value="/rtabmap/odom"/>
+        <param name="vision_pose_topic" value="/mavros/vision_pose/pose"/>
+        <param name="bootstrap_enabled" value="false"/>
+        <param name="max_jump_m"        value="0.5"/>
+      </node>
+    </group>
   </group>
-  <group if="$(eval vio_source == 'rtabmap')">
+
+  <!-- ============ REAL ============ -->
+  <group if="$(eval platform == 'real')">
+    <include file="$(find ee478_bringup)/launch/px4_real.launch">
+      <arg name="fcu_url" value="$(arg fcu_url)"/>
+    </include>
+    <!-- Real drone always uses RTAB-Map; GT does not exist there. -->
     <include file="$(find ee478_localization)/launch/rtabmap_sim.launch"/>
     <node pkg="ee478_localization" type="vio_bridge_node.py"
           name="vio_bridge" output="screen">
@@ -40,12 +71,15 @@
     </node>
   </group>
 
+  <!-- ============ OFFBOARD CONTROLLER (both platforms) ============ -->
   <node pkg="ee478_planner" type="offboard_controller.py"
         name="offboard_controller" output="screen">
     <remap from="~goal"    to="/offboard/goal"/>
     <remap from="~cmd_raw" to="/offboard/cmd_raw"/>
-    <param name="takeoff_alt" value="$(arg hover_z)"/>
-    <param name="auto_arm"    value="true"/>
-    <param name="settle_s"    value="10.0"/>
+    <param name="takeoff_alt"    value="$(arg hover_z)"/>
+    <param name="auto_arm"       value="$(arg auto_arm)"/>
+    <param name="settle_s"       value="10.0"/>
+    <param name="max_step_vel"   value="0.6"/>
+    <param name="max_step_vel_z" value="0.3"/>
   </node>
 </launch>

@@ -2,51 +2,57 @@
 <!--
   Sub-task 3: QUIZ SOLVE + GATE SELECT
   ====================================
-  Drone is hovering in front of the quiz screen between the gates.
-  quiz_screen_reader (real drone: YOLO/OCR; sim: sim_world_publisher
-  with GT) emits a QuizGateArray on /quiz/gates carrying the question
-  text + a candidate gate per lane with labels read from the lane
-  scoreboards. quiz_solver picks the gate whose label equals the
-  arithmetic answer and publishes /quiz/chosen_pose +
-  /quiz/chosen_label.
+  On SIM: sim_world_publisher fabricates /quiz/gates from gazebo GT.
+  On REAL: quiz_screen_reader (not yet written; TODO) does YOLO/OCR
+           on the camera frame. For initial real-drone bring-up, the
+           operator can manually inject /quiz/gates via rostopic pub
+           and verify quiz_solver picks the right gate.
 
-  Test:
-    roslaunch ee478_bringup s3_quiz_solve.launch \
-        question:="5 + 9 = ?" \
-        gate_left_label:=14 \
-        gate_center_label:=7 \
-        gate_right_label:=9
-    rostopic echo /quiz/chosen_label
-    # expect: 14
-    rostopic echo /quiz/chosen_pose | grep -A3 position
-    # expect: y=+1.8 (the left lane)
+  Sim:
+    roslaunch ee478_bringup s3_quiz_solve.launch platform:=sim \
+        question:="5 + 9 = ?" gate_left_label:=14 \
+        gate_center_label:=7 gate_right_label:=9
 
-  Real-drone TODO: replace sim_world_publisher with a
-  quiz_screen_reader_node that runs OCR on the gate scoreboards and
-  YOLO on the question pane to assemble the QuizGateArray. quiz_solver
-  stays unchanged.
+  Real (manual injection until quiz_screen_reader is integrated):
+    roslaunch ee478_bringup s3_quiz_solve.launch platform:=real
+    rostopic pub -1 /quiz/gates ee478_msgs/QuizGateArray \
+      "{header: {frame_id: 'map'}, question: '5+9=?',
+        gates: [{label: 14, center_world: {x: 3.0, y: 1.8, z: 0.7}},
+                {label: 7,  center_world: {x: 3.0, y: 0.0, z: 0.7}},
+                {label: 9,  center_world: {x: 3.0, y: -1.8, z: 0.7}}]}"
+
+  Verify:
+    rostopic echo /quiz/chosen_label    # expect 14
+    rostopic echo /quiz/chosen_pose     # expect y near 1.8
 -->
 <launch>
-  <arg name="vio_source"        default="gt"/>
-  <arg name="hover_z"           default="0.7"/>
+  <arg name="platform"        default="sim"/>
+  <arg name="vio_source"      default="gt"/>
+  <arg name="hover_z"
+       default="$(eval 0.5 if arg('platform') == 'real' else 0.7)"/>
   <arg name="question"          default="5 + 9 = ?"/>
   <arg name="gate_left_label"   default="14"/>
   <arg name="gate_center_label" default="7"/>
   <arg name="gate_right_label"  default="9"/>
+  <arg name="fcu_url"
+       default="serial:///dev/ttyTHS1:921600"/>
 
   <include file="$(find ee478_bringup)/launch/subtasks/s1_takeoff.launch">
+    <arg name="platform"   value="$(arg platform)"/>
     <arg name="vio_source" value="$(arg vio_source)"/>
     <arg name="hover_z"    value="$(arg hover_z)"/>
+    <arg name="fcu_url"    value="$(arg fcu_url)"/>
   </include>
 
-  <!-- SIM perception stub: publishes /quiz/gates from gazebo GT. -->
-  <node pkg="ee478_perception" type="sim_world_publisher_node.py"
-        name="sim_world_publisher" output="screen">
-    <param name="question"          value="$(arg question)"/>
-    <param name="gate_left_label"   value="$(arg gate_left_label)"/>
-    <param name="gate_center_label" value="$(arg gate_center_label)"/>
-    <param name="gate_right_label"  value="$(arg gate_right_label)"/>
-  </node>
+  <group if="$(eval platform == 'sim')">
+    <node pkg="ee478_perception" type="sim_world_publisher_node.py"
+          name="sim_world_publisher" output="screen">
+      <param name="question"          value="$(arg question)"/>
+      <param name="gate_left_label"   value="$(arg gate_left_label)"/>
+      <param name="gate_center_label" value="$(arg gate_center_label)"/>
+      <param name="gate_right_label"  value="$(arg gate_right_label)"/>
+    </node>
+  </group>
 
   <node pkg="ee478_agent" type="quiz_solver_node.py"
         name="quiz_solver" output="screen">

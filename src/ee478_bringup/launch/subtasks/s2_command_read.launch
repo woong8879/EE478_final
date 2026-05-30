@@ -2,36 +2,41 @@
 <!--
   Sub-task 2: COMMAND READ
   ========================
-  Drone is hovering at hover_z. A command "screen" (or audio
-  transcript) is shown to the camera. command_interpreter
-  classifies into a store category and publishes /mission_target.
+  Just runs command_interpreter on top of an airborne drone. Pure
+  software node, identical on sim and real.
 
-  Test (default keyword path):
-    roslaunch ee478_bringup s2_command_read.launch \
+  Sim:
+    roslaunch ee478_bringup s2_command_read.launch platform:=sim \
         mission_command:="Deliver to the cafe"
-    rostopic echo /mission_target
-    # expect: "CAFE"
+  Real:
+    roslaunch ee478_bringup s2_command_read.launch platform:=real \
+        mission_command:="Deliver to the cafe"
 
-  Test (LLM path via /mission_command publish):
-    roslaunch ee478_bringup s2_command_read.launch
+  Verify:
+    rostopic echo /mission_target   # expect CAFE / PHARMACY / ...
+
+  You can also test the LLM path by leaving mission_command empty and
+  publishing live:
     rostopic pub -1 /mission_command std_msgs/String \
-        "data: 'Take this to the pharmacy please'"
-    rostopic echo /mission_target
-    # expect: "PHARMACY"
+      "data: 'Drop this at the pharmacy please'"
 
-  Real-drone TODO: replace the String input with a
-  command_screen_reader_node that does OCR / YOLO on the camera
-  feed and publishes /mission_command as String. The downstream
-  command_interpreter stays unchanged.
+  Real-drone TODO: replace the String input with
+  command_screen_reader_node (YOLO + OCR on the camera frame).
 -->
 <launch>
+  <arg name="platform"        default="sim"/>
   <arg name="vio_source"      default="gt"/>
-  <arg name="hover_z"         default="0.7"/>
+  <arg name="hover_z"
+       default="$(eval 0.5 if arg('platform') == 'real' else 0.7)"/>
   <arg name="mission_command" default=""/>
+  <arg name="fcu_url"
+       default="serial:///dev/ttyTHS1:921600"/>
 
   <include file="$(find ee478_bringup)/launch/subtasks/s1_takeoff.launch">
+    <arg name="platform"   value="$(arg platform)"/>
     <arg name="vio_source" value="$(arg vio_source)"/>
     <arg name="hover_z"    value="$(arg hover_z)"/>
+    <arg name="fcu_url"    value="$(arg fcu_url)"/>
   </include>
 
   <node pkg="ee478_agent" type="command_interpreter_node.py"

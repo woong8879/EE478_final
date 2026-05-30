@@ -2,35 +2,43 @@
 <!--
   Sub-task 5: SEE ALL 3 STORES AT ONCE, PICK THE TARGET
   =====================================================
-  Drone has navigated to a viewing point where all three storefronts
-  are inside the camera FOV simultaneously. We use /mission_target
-  (from sub-task 2) plus /semantic_map (real drone: filled by YOLO
-  storefront recogniser; sim: filled from gazebo GT) to choose ONE
-  store and publish its approach pose on /target_store_pose.
+  On SIM: sim_world_publisher publishes /semantic_map from gazebo GT.
+  On REAL: storefront_recogniser (TODO) publishes /semantic_map from
+           YOLO on the camera frame. For initial real-drone bring-up,
+           operator can manually inject /semantic_map via rostopic pub
+           (template in README).
 
-  Test:
-    roslaunch ee478_bringup s5_store_select.launch \
+  Sim:
+    roslaunch ee478_bringup s5_store_select.launch platform:=sim \
         mission_command:="Deliver to the pharmacy"
-    rostopic echo /target_store_pose | grep -A3 position
-    # expect: y close to -2.5 (pharmacy facade)
+  Real (manual SemanticMap injection until perception lands):
+    roslaunch ee478_bringup s5_store_select.launch platform:=real \
+        mission_command:="Deliver to the pharmacy"
+    # then publish /semantic_map manually — see README for template
 
-  Real-drone TODO: sim_world_publisher is replaced by a
-  storefront_recogniser_node that takes the camera frame, runs YOLO
-  classification on each detected facade, and emits a SemanticMap
-  with category labels. store_identifier downstream stays unchanged.
+  Verify:
+    rostopic echo /target_store_pose | grep -A3 position
 -->
 <launch>
+  <arg name="platform"        default="sim"/>
   <arg name="vio_source"      default="gt"/>
-  <arg name="hover_z"         default="0.7"/>
+  <arg name="hover_z"
+       default="$(eval 0.5 if arg('platform') == 'real' else 0.7)"/>
   <arg name="mission_command" default="Deliver to the cafe"/>
+  <arg name="fcu_url"
+       default="serial:///dev/ttyTHS1:921600"/>
 
   <include file="$(find ee478_bringup)/launch/subtasks/s1_takeoff.launch">
+    <arg name="platform"   value="$(arg platform)"/>
     <arg name="vio_source" value="$(arg vio_source)"/>
     <arg name="hover_z"    value="$(arg hover_z)"/>
+    <arg name="fcu_url"    value="$(arg fcu_url)"/>
   </include>
 
-  <node pkg="ee478_perception" type="sim_world_publisher_node.py"
-        name="sim_world_publisher" output="screen"/>
+  <group if="$(eval platform == 'sim')">
+    <node pkg="ee478_perception" type="sim_world_publisher_node.py"
+          name="sim_world_publisher" output="screen"/>
+  </group>
 
   <node pkg="ee478_agent" type="command_interpreter_node.py"
         name="command_interpreter" output="screen">

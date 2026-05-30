@@ -2,41 +2,48 @@
 <!--
   Sub-task 7: RETURN THROUGH THE SAME (OUTBOUND) GATE
   ===================================================
-  Drone is at the target store after signature. Mission spec: come
-  back through the SAME gate aperture (no second quiz). The outbound
-  gate y-lane is `gate_y` (default 1.8 == left lane, matching
-  question 5+9=14). EGO plans cafe -> (gate_x+1.5, gate_y) ->
-  (gate_x-1.0, gate_y) -> pickup, avoiding the corridor walls.
+  Three-leg /next_goal stream: pre-gate -> through-gate -> pickup.
+  EGO avoids whatever is in the depth cloud along the way.
 
-  Test:
-    roslaunch ee478_bringup s7_return_gate.launch \
+  Sim:
+    roslaunch ee478_bringup s7_return_gate.launch platform:=sim \
         gate_y:=1.8 pickup_x:=0.0 pickup_y:=0.0
-    # drone should fly back through the left lane and end near
-    # pickup. Pass: gazebo iris arrives within ~0.6 m of (0, 0).
-
-  Real-drone TODO: gate_y comes from /quiz/chosen_pose (latched).
+  Real (operator arms, conservative velocity, short legs):
+    roslaunch ee478_bringup s7_return_gate.launch platform:=real \
+        gate_x:=2.0 gate_y:=0.0 pickup_x:=0.0 pickup_y:=0.0 \
+        max_vel:=0.4
 -->
 <launch>
+  <arg name="platform"   default="sim"/>
   <arg name="vio_source" default="gt"/>
-  <arg name="hover_z"    default="0.7"/>
+  <arg name="hover_z"
+       default="$(eval 0.5 if arg('platform') == 'real' else 0.7)"/>
   <arg name="gate_x"     default="3.0"/>
   <arg name="gate_y"     default="1.8"/>
   <arg name="pickup_x"   default="0.0"/>
   <arg name="pickup_y"   default="0.0"/>
+  <arg name="max_vel"
+       default="$(eval 0.4 if arg('platform') == 'real' else 1.0)"/>
+  <arg name="fcu_url"
+       default="serial:///dev/ttyTHS1:921600"/>
 
   <include file="$(find ee478_bringup)/launch/subtasks/s1_takeoff.launch">
+    <arg name="platform"   value="$(arg platform)"/>
     <arg name="vio_source" value="$(arg vio_source)"/>
     <arg name="hover_z"    value="$(arg hover_z)"/>
+    <arg name="fcu_url"    value="$(arg fcu_url)"/>
   </include>
 
+  <arg name="cloud_topic"
+       default="$(eval '/iris_depth_camera_vio/camera/depth/points'
+                       if arg('platform') == 'sim'
+                       else '/camera/depth/color/points')"/>
   <include file="$(find ee478_planner)/launch/ego_planner.launch">
-    <arg name="cloud_topic"      value="/iris_depth_camera_vio/camera/depth/points"/>
+    <arg name="cloud_topic"      value="$(arg cloud_topic)"/>
     <arg name="planning_horizon" value="3.0"/>
-    <arg name="max_vel"          value="1.0"/>
+    <arg name="max_vel"          value="$(arg max_vel)"/>
   </include>
 
-  <!-- Three-leg return script: pre-gate -> through-gate -> pickup.
-       Each /next_goal stream is held for ~12 s. -->
   <node pkg="rostopic" type="rostopic"
         name="return_leg1_pre_gate"
         args="pub -l -r 1.0 /next_goal geometry_msgs/PoseStamped
