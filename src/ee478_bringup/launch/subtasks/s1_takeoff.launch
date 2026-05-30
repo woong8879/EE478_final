@@ -1,0 +1,51 @@
+<?xml version="1.0"?>
+<!--
+  Sub-task 1: TAKEOFF
+  =====================
+  Brings up PX4 SITL + VIO + offboard_controller and lets the drone
+  arm + ascend to hover_z. NO mission FSM, NO planner, NO perception.
+  Drone just sits at hover.
+
+  Pass criterion: gazebo z > 0.6 within 30 s and stays armed +
+  OFFBOARD for at least 5 s.
+
+  Test:
+    roslaunch ee478_bringup s1_takeoff.launch
+    # in another shell:
+    rostopic echo /mavros/local_position/pose | grep -A3 position
+-->
+<launch>
+  <arg name="vio_source" default="gt"/>
+  <arg name="hover_z"    default="0.7"/>
+
+  <include file="$(find ee478_bringup)/launch/px4_sitl.launch">
+    <arg name="vehicle" value="iris_depth_camera_vio"/>
+  </include>
+
+  <group if="$(eval vio_source == 'gt')">
+    <node pkg="ee478_localization" type="gt_vision_bridge_node.py"
+          name="gt_vision_bridge" output="screen">
+      <param name="target_model" value="iris_depth_camera_vio"/>
+      <param name="rate_hz"      value="30.0"/>
+    </node>
+  </group>
+  <group if="$(eval vio_source == 'rtabmap')">
+    <include file="$(find ee478_localization)/launch/rtabmap_sim.launch"/>
+    <node pkg="ee478_localization" type="vio_bridge_node.py"
+          name="vio_bridge" output="screen">
+      <param name="vo_topic"          value="/rtabmap/odom"/>
+      <param name="vision_pose_topic" value="/mavros/vision_pose/pose"/>
+      <param name="bootstrap_enabled" value="false"/>
+      <param name="max_jump_m"        value="0.5"/>
+    </node>
+  </group>
+
+  <node pkg="ee478_planner" type="offboard_controller.py"
+        name="offboard_controller" output="screen">
+    <remap from="~goal"    to="/offboard/goal"/>
+    <remap from="~cmd_raw" to="/offboard/cmd_raw"/>
+    <param name="takeoff_alt" value="$(arg hover_z)"/>
+    <param name="auto_arm"    value="true"/>
+    <param name="settle_s"    value="10.0"/>
+  </node>
+</launch>

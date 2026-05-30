@@ -1,0 +1,42 @@
+<?xml version="1.0"?>
+<!--
+  Sub-task 2: COMMAND READ
+  ========================
+  Drone is hovering at hover_z. A command "screen" (or audio
+  transcript) is shown to the camera. command_interpreter
+  classifies into a store category and publishes /mission_target.
+
+  Test (default keyword path):
+    roslaunch ee478_bringup s2_command_read.launch \
+        mission_command:="Deliver to the cafe"
+    rostopic echo /mission_target
+    # expect: "CAFE"
+
+  Test (LLM path via /mission_command publish):
+    roslaunch ee478_bringup s2_command_read.launch
+    rostopic pub -1 /mission_command std_msgs/String \
+        "data: 'Take this to the pharmacy please'"
+    rostopic echo /mission_target
+    # expect: "PHARMACY"
+
+  Real-drone TODO: replace the String input with a
+  command_screen_reader_node that does OCR / YOLO on the camera
+  feed and publishes /mission_command as String. The downstream
+  command_interpreter stays unchanged.
+-->
+<launch>
+  <arg name="vio_source"      default="gt"/>
+  <arg name="hover_z"         default="0.7"/>
+  <arg name="mission_command" default=""/>
+
+  <include file="$(find ee478_bringup)/launch/subtasks/s1_takeoff.launch">
+    <arg name="vio_source" value="$(arg vio_source)"/>
+    <arg name="hover_z"    value="$(arg hover_z)"/>
+  </include>
+
+  <node pkg="ee478_agent" type="command_interpreter_node.py"
+        name="command_interpreter" output="screen">
+    <param name="initial_command" value="$(arg mission_command)"/>
+    <param name="allow_llm"       value="true"/>
+  </node>
+</launch>

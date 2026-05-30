@@ -1,0 +1,48 @@
+<?xml version="1.0"?>
+<!--
+  Sub-task 4: OBSTACLE-AWARE NAVIGATION
+  =====================================
+  Drone is hovering at the pickup. We publish a single high-level
+  /next_goal in the obstacle field (e.g. middle of the store row at
+  (15, 0, 0.7)). EGO-Planner has to plan around the corridor walls
+  and the lane obstacles. NO mission FSM, NO quiz, NO store ID, NO
+  signature. Just "go here, avoid stuff."
+
+  Test:
+    roslaunch ee478_bringup s4_nav_course.launch \
+        goal_x:=15.0 goal_y:=0.0 goal_z:=0.7
+    # drone should fly there avoiding obstacles, then hold.
+
+  Pass criterion: gazebo iris_depth_camera_vio reaches (goal_x,
+  goal_y) within ~1.0 m without crashing into anything in
+  ee478_project_simple.world.
+-->
+<launch>
+  <arg name="vio_source" default="gt"/>
+  <arg name="hover_z"    default="0.7"/>
+  <arg name="goal_x"     default="15.0"/>
+  <arg name="goal_y"     default="0.0"/>
+  <arg name="goal_z"     default="0.7"/>
+
+  <include file="$(find ee478_bringup)/launch/subtasks/s1_takeoff.launch">
+    <arg name="vio_source" value="$(arg vio_source)"/>
+    <arg name="hover_z"    value="$(arg hover_z)"/>
+  </include>
+
+  <include file="$(find ee478_planner)/launch/ego_planner.launch">
+    <arg name="cloud_topic"      value="/iris_depth_camera_vio/camera/depth/points"/>
+    <arg name="planning_horizon" value="3.0"/>
+    <arg name="max_vel"          value="1.0"/>
+  </include>
+
+  <!-- Inject the goal once after a 25 s settle so PX4 + EGO have
+       finished initialising. -->
+  <node pkg="rostopic" type="rostopic" name="goal_injector"
+        args="pub -l -r 0.5 /next_goal geometry_msgs/PoseStamped
+              '{header: {frame_id: map},
+                pose: {position: {x: $(arg goal_x),
+                                  y: $(arg goal_y),
+                                  z: $(arg goal_z)},
+                       orientation: {w: 1.0}}}'"
+        launch-prefix="bash -c 'sleep 25; $0 $@'"/>
+</launch>

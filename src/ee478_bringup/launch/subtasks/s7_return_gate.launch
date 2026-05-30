@@ -1,0 +1,69 @@
+<?xml version="1.0"?>
+<!--
+  Sub-task 7: RETURN THROUGH THE SAME (OUTBOUND) GATE
+  ===================================================
+  Drone is at the target store after signature. Mission spec: come
+  back through the SAME gate aperture (no second quiz). The outbound
+  gate y-lane is `gate_y` (default 1.8 == left lane, matching
+  question 5+9=14). EGO plans cafe -> (gate_x+1.5, gate_y) ->
+  (gate_x-1.0, gate_y) -> pickup, avoiding the corridor walls.
+
+  Test:
+    roslaunch ee478_bringup s7_return_gate.launch \
+        gate_y:=1.8 pickup_x:=0.0 pickup_y:=0.0
+    # drone should fly back through the left lane and end near
+    # pickup. Pass: gazebo iris arrives within ~0.6 m of (0, 0).
+
+  Real-drone TODO: gate_y comes from /quiz/chosen_pose (latched).
+-->
+<launch>
+  <arg name="vio_source" default="gt"/>
+  <arg name="hover_z"    default="0.7"/>
+  <arg name="gate_x"     default="3.0"/>
+  <arg name="gate_y"     default="1.8"/>
+  <arg name="pickup_x"   default="0.0"/>
+  <arg name="pickup_y"   default="0.0"/>
+
+  <include file="$(find ee478_bringup)/launch/subtasks/s1_takeoff.launch">
+    <arg name="vio_source" value="$(arg vio_source)"/>
+    <arg name="hover_z"    value="$(arg hover_z)"/>
+  </include>
+
+  <include file="$(find ee478_planner)/launch/ego_planner.launch">
+    <arg name="cloud_topic"      value="/iris_depth_camera_vio/camera/depth/points"/>
+    <arg name="planning_horizon" value="3.0"/>
+    <arg name="max_vel"          value="1.0"/>
+  </include>
+
+  <!-- Three-leg return script: pre-gate -> through-gate -> pickup.
+       Each /next_goal stream is held for ~12 s. -->
+  <node pkg="rostopic" type="rostopic"
+        name="return_leg1_pre_gate"
+        args="pub -l -r 1.0 /next_goal geometry_msgs/PoseStamped
+              '{header: {frame_id: map},
+                pose: {position: {x: $(eval gate_x + 1.0),
+                                  y: $(arg gate_y),
+                                  z: $(arg hover_z)},
+                       orientation: {w: 1.0}}}'"
+        launch-prefix="bash -c 'sleep 25; timeout 12 $0 $@'"/>
+
+  <node pkg="rostopic" type="rostopic"
+        name="return_leg2_through_gate"
+        args="pub -l -r 1.0 /next_goal geometry_msgs/PoseStamped
+              '{header: {frame_id: map},
+                pose: {position: {x: $(eval gate_x - 1.0),
+                                  y: $(arg gate_y),
+                                  z: $(arg hover_z)},
+                       orientation: {w: 1.0}}}'"
+        launch-prefix="bash -c 'sleep 37; timeout 12 $0 $@'"/>
+
+  <node pkg="rostopic" type="rostopic"
+        name="return_leg3_pickup"
+        args="pub -l -r 1.0 /next_goal geometry_msgs/PoseStamped
+              '{header: {frame_id: map},
+                pose: {position: {x: $(arg pickup_x),
+                                  y: $(arg pickup_y),
+                                  z: $(arg hover_z)},
+                       orientation: {w: 1.0}}}'"
+        launch-prefix="bash -c 'sleep 49; $0 $@'"/>
+</launch>

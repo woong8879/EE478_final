@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<!--
+  Sub-task 8: LAND AT CURRENT POSE
+  ================================
+  Drone hovering anywhere (typically the pickup). land_node descends
+  the setpoint to ~5 cm above the ground, waits for the EKF to
+  confirm contact, then disarms.
+
+  Test:
+    roslaunch ee478_bringup s8_land.launch
+    # in another shell after the drone has reached hover:
+    rostopic pub -1 /mission/land_trigger std_msgs/Bool "data: true"
+    rostopic echo /mission/land_done
+    # expect: data: True  + drone disarmed in MAVROS state.
+-->
+<launch>
+  <arg name="vio_source" default="gt"/>
+  <arg name="hover_z"    default="0.7"/>
+
+  <include file="$(find ee478_bringup)/launch/subtasks/s1_takeoff.launch">
+    <arg name="vio_source" value="$(arg vio_source)"/>
+    <arg name="hover_z"    value="$(arg hover_z)"/>
+  </include>
+
+  <!-- direct_goal_follower carries the descend setpoints from
+       land_node into /offboard/goal. -->
+  <node pkg="ee478_planner" type="direct_goal_follower.py"
+        name="direct_goal_follower" output="screen">
+    <param name="rate_hz"          value="20.0"/>
+    <param name="arrival_radius_m" value="0.4"/>
+  </node>
+
+  <node pkg="ee478_agent" type="land_node.py"
+        name="land_node" output="screen">
+    <param name="descend_z" value="0.05"/>
+    <param name="ground_z"  value="0.15"/>
+  </node>
+</launch>

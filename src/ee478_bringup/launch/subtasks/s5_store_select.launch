@@ -1,0 +1,46 @@
+<?xml version="1.0"?>
+<!--
+  Sub-task 5: SEE ALL 3 STORES AT ONCE, PICK THE TARGET
+  =====================================================
+  Drone has navigated to a viewing point where all three storefronts
+  are inside the camera FOV simultaneously. We use /mission_target
+  (from sub-task 2) plus /semantic_map (real drone: filled by YOLO
+  storefront recogniser; sim: filled from gazebo GT) to choose ONE
+  store and publish its approach pose on /target_store_pose.
+
+  Test:
+    roslaunch ee478_bringup s5_store_select.launch \
+        mission_command:="Deliver to the pharmacy"
+    rostopic echo /target_store_pose | grep -A3 position
+    # expect: y close to -2.5 (pharmacy facade)
+
+  Real-drone TODO: sim_world_publisher is replaced by a
+  storefront_recogniser_node that takes the camera frame, runs YOLO
+  classification on each detected facade, and emits a SemanticMap
+  with category labels. store_identifier downstream stays unchanged.
+-->
+<launch>
+  <arg name="vio_source"      default="gt"/>
+  <arg name="hover_z"         default="0.7"/>
+  <arg name="mission_command" default="Deliver to the cafe"/>
+
+  <include file="$(find ee478_bringup)/launch/subtasks/s1_takeoff.launch">
+    <arg name="vio_source" value="$(arg vio_source)"/>
+    <arg name="hover_z"    value="$(arg hover_z)"/>
+  </include>
+
+  <node pkg="ee478_perception" type="sim_world_publisher_node.py"
+        name="sim_world_publisher" output="screen"/>
+
+  <node pkg="ee478_agent" type="command_interpreter_node.py"
+        name="command_interpreter" output="screen">
+    <param name="initial_command" value="$(arg mission_command)"/>
+    <param name="allow_llm"       value="true"/>
+  </node>
+
+  <node pkg="ee478_perception" type="store_identifier_node.py"
+        name="store_identifier" output="screen">
+    <param name="standoff_m" value="1.5"/>
+    <param name="target_z"   value="$(arg hover_z)"/>
+  </node>
+</launch>
