@@ -21,7 +21,5 @@
   <exec_depend>mavros</exec_depend>
   <exec_depend>mavros_msgs</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
-  <exec_depend>vins</exec_depend>
-  <exec_depend>loop_fusion</exec_depend>
   <exec_depend>ee478_msgs</exec_depend>
 </package>

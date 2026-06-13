@@ -1,69 +1,51 @@
 <?xml version="1.0"?>
 <!--
-  EE478 FINAL — full mission in one launch.
-  ============================================
-  Stack = s4's planner (s1 takeoff + EGO) + the dual delivery cameras + the
-  always-on AprilTag detector, orchestrated by final_mission_node and finished
-  by precision_land_node.
+  EE478 FINAL — full autonomous delivery mission (real drone).
 
-  FLOW
-    takeoff (operator flips OFFBOARD; auto-arm, climb to hover_z)
-    -> Gate 1 (wall x=3.5, cross +x): NAV to quiz pt (1.5,0) facing +x -> ChatGPT
-       LEFT/RIGHT -> through chosen opening (tags 281/282 | 283/284)
-    -> Gate 2 (wall y=3.5, cross +y): NAV (6.5,0)(9.9,0)(9.9,2) facing +y ->
-       quiz -> through (266/267 | 268/269)
-    -> Gate 3 (wall x=3.5, cross -x): NAV (9.9,6.5)(9.9,7.2)(5.5,7.2) facing -x
-       -> quiz -> through (271/274 | 275/276)
-    -> precision_land: force RGB+YOLO, strafe-search the target box, approach,
-       climb to 1 m, centre the box top (down cam), land ON the box, disarm.
+  The operator flips OFFBOARD on the RC; the stack then runs end-to-end:
+    1. auto-arm, climb to hover_z.
+    2. Gate 1/2/3 (each): NAV to the quiz point -> ChatGPT reads the monitor
+       and picks the LEFT/RIGHT opening -> cross it (tags verify the centre).
+         gate1 wall x=3.5 | tags 281/282 (L) 283/284 (R)
+         gate2 wall y=3.5 | tags 266/267 (L) 268/269 (R)
+         gate3 wall x=3.5 | tags 271/274 (L) 275/276 (R); a one-shot tag
+               anchor (274+275) corrects drift before the landing phase.
+    3. precision_land: fly to the box row, find the target box, centre its top
+       with the down camera, descend onto it, cut motors on the box.
 
   RUN
     export OPENAI_API_KEY=sk-...
-    roslaunch ee478_bringup final.launch target:=cafe
-
-  Intermediate waypoints follow s4_nav_course but the gate-crossing legs are
-  replaced by the quiz-selected opening (s4_nav was the all-LEFT-gate version).
+    roslaunch ee478_bringup final.launch target:=hamburger   # store|pharmacy|hamburger|cafe
 -->
 <launch>
-  <arg name="platform"   default="real"/>
-  <arg name="vio_source" default="gt"/>
-  <arg name="hover_z"    default="0.7"/>
-  <arg name="target"     default="cafe"/>   <!-- store|pharmacy|hamburger|cafe -->
-  <arg name="max_vel"
-       default="$(eval 0.3 if arg('platform') == 'real' else 1.0)"/>
-  <arg name="fcu_url"    default="serial:///dev/ttyTHS0:921600"/>
-  <arg name="api_key"    default="$(optenv OPENAI_API_KEY)"/>
+  <arg name="target"  default="cafe"/>   <!-- store|pharmacy|hamburger|cafe -->
+  <arg name="hover_z" default="0.7"/>
+  <arg name="fcu_url" default="serial:///dev/ttyTHS0:921600"/>
+  <arg name="api_key" default="$(optenv OPENAI_API_KEY)"/>
 
-  <!-- takeoff + camera/VIO/mavros + delivery cams + apriltag + recorder -->
+  <!-- takeoff + RealSense/VIO/MAVROS + dual delivery cameras + AprilTag
+       detector + flight recorder -->
   <include file="$(find ee478_bringup)/launch/subtasks/s1_takeoff.launch">
-    <arg name="platform"   value="$(arg platform)"/>
-    <arg name="vio_source" value="$(arg vio_source)"/>
-    <arg name="hover_z"    value="$(arg hover_z)"/>
-    <arg name="fcu_url"    value="$(arg fcu_url)"/>
+    <arg name="platform" value="real"/>
+    <arg name="hover_z"  value="$(arg hover_z)"/>
+    <arg name="fcu_url"  value="$(arg fcu_url)"/>
   </include>
 
-  <!-- EGO local planner (identical to s4). Ceiling +0.6 so the MOUNT climb to
-       1 m before landing stays inside the map. -->
-  <arg name="cloud_topic"
-       default="$(eval '/iris_depth_camera_vio/camera/depth/points'
-                       if arg('platform') == 'sim'
-                       else '/camera/depth/points')"/>
-  <arg name="z_band" default="0.2"/>
-  <arg name="max_acc" default="0.3"/>
-  <arg name="max_jer" default="2.0"/>
+  <!-- EGO local planner: obstacle-avoiding trajectories for the gate legs.
+       Ceiling = hover_z + 0.8 keeps the 0.8 m MOUNT climb inside the map. -->
   <include file="$(find ee478_planner)/launch/ego_planner.launch">
-    <arg name="platform"         value="$(arg platform)"/>
-    <arg name="cloud_topic"      value="$(arg cloud_topic)"/>
+    <arg name="platform"         value="real"/>
+    <arg name="cloud_topic"      value="/camera/depth/points"/>
     <arg name="planning_horizon" value="3.0"/>
-    <arg name="max_vel"          value="$(arg max_vel)"/>
-    <arg name="max_acc"          value="$(arg max_acc)"/>
-    <arg name="max_jer"          value="$(arg max_jer)"/>
+    <arg name="max_vel"          value="0.3"/>
+    <arg name="max_acc"          value="0.3"/>
+    <arg name="max_jer"          value="2.0"/>
     <arg name="hover_z"          value="$(arg hover_z)"/>
-    <arg name="virtual_ceil"     value="$(eval arg('hover_z') + arg('z_band') + 0.6)"/>
+    <arg name="virtual_ceil"     value="$(eval arg('hover_z') + 0.8)"/>
     <arg name="virtual_ground"   value="-1.0"/>
   </include>
 
-  <!-- gate orchestrator: NAV + quiz + tag-verified passage for all 3 gates -->
+  <!-- gate orchestrator: NAV + ChatGPT quiz + tag-verified crossing, x3 -->
   <node pkg="ee478_agent" type="final_mission_node.py" name="final_mission"
         output="screen" launch-prefix="taskset -c 2-5">
     <param name="api_key" value="$(arg api_key)"/>
@@ -71,7 +53,7 @@
     <param name="hover_z" value="$(arg hover_z)"/>
   </node>
 
-  <!-- box detect + approach + landing; waits for final_mission's handoff -->
+  <!-- box search + approach + landing; waits for final_mission's handoff -->
   <node pkg="ee478_agent" type="precision_land_node.py" name="precision_land"
         output="screen" launch-prefix="taskset -c 2-5">
     <param name="auto"         value="false"/>   <!-- external start -->

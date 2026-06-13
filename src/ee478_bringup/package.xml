@@ -16,8 +16,6 @@
 
   <exec_depend>ee478_localization</exec_depend>
   <exec_depend>ee478_planner</exec_depend>
-  <exec_depend>ee478_perception</exec_depend>
   <exec_depend>ee478_agent</exec_depend>
-  <exec_depend>vins</exec_depend>
   <exec_depend>ego_planner</exec_depend>
 </package>
