@@ -47,6 +47,9 @@ import rospy
 from geometry_msgs.msg import PoseStamped, Point
 from nav_msgs.msg import Odometry
 from std_msgs.msg import String
+from tf.transformations import (quaternion_matrix, quaternion_from_matrix,
+                                translation_matrix, translation_from_matrix)
+import numpy as _np
 
 try:
     from gazebo_msgs.msg import ModelStates
@@ -94,6 +97,23 @@ class VioBridgeNode:
             rospy.get_param("~anchor_blend_rate", 0.2))
         # anchor inputs older than this are considered stale
         self.anchor_fresh_s = float(rospy.get_param("~anchor_fresh_s", 2.0))
+
+        # Body-frame correction via TF. The VO reports the pose of its own
+        # body frame (VINS-Fusion: the camera/IMU OPTICAL frame) in the VO
+        # world frame. PX4 wants the drone FLU base_link pose. We look the
+        # fixed transform vo_body_frame -> base_frame up from the TF tree
+        # (defined by the camera mount + RealSense calibration, NOT a magic
+        # number here) and compose it onto every VO sample:
+        #     T_world_base = T_world_vobody * T_vobody_base
+        # Leave vo_body_frame empty to disable (RTAB-Map already publishes
+        # the FLU base_link pose directly).
+        self.vo_body_frame = rospy.get_param("~vo_body_frame", "")
+        self.base_frame = rospy.get_param("~base_frame", "base_link")
+        self._T_body_base = None          # cached (qx,qy,qz,qw, tx,ty,tz)
+        if self.vo_body_frame:
+            import tf2_ros
+            self._tf_buf = tf2_ros.Buffer()
+            self._tf_listener = tf2_ros.TransformListener(self._tf_buf)
 
         # --- state ---
         self.last_vo = None              # (Odometry msg, rospy.Time)
@@ -146,9 +166,20 @@ class VioBridgeNode:
         self.recent_offsets = []   # list of (dx, dy, dz)
         self.locked_offset = None  # (dx, dy, dz) once handoff done
 
+        # Feed PX4 the FULL VINS state (pose + velocity) via the odometry
+        # interface instead of position-only vision_pose. With velocity
+        # supplied, EKF2 does not differentiate position (noisy, esp. in z)
+        # nor lean on its own accel-z integration -> the fused estimate
+        # tracks VINS tightly ("100% VINS"). When true, vision_pose is NOT
+        # published (avoid double-fusing).
+        self.use_odometry = bool(rospy.get_param("~use_odometry", False))
+        self.odom_topic = rospy.get_param("~odom_topic", "/mavros/odometry/in")
+
         # --- ROS I/O ---
         self.pub = rospy.Publisher(
             self.vision_topic, PoseStamped, queue_size=10)
+        self.pub_odom = rospy.Publisher(
+            self.odom_topic, Odometry, queue_size=10)
         self.pub_mode = rospy.Publisher(
             "/vio_bridge/mode", String, queue_size=1, latch=True)
 
@@ -376,6 +407,50 @@ class VioBridgeNode:
             self.target_offset = [target_x, target_y, target_z]
             self.last_anchor = (msg, rospy.Time.now())
 
+    def _get_T_body_base(self):
+        """Cached 4x4 transform vo_body_frame -> base_frame, from TF."""
+        if self._T_body_base is not None:
+            return self._T_body_base
+        try:
+            tf = self._tf_buf.lookup_transform(
+                self.vo_body_frame, self.base_frame,
+                rospy.Time(0), rospy.Duration(0.2))
+            t = tf.transform.translation
+            q = tf.transform.rotation
+            M = quaternion_matrix([q.x, q.y, q.z, q.w])
+            M[0:3, 3] = [t.x, t.y, t.z]
+            self._T_body_base = M     # static -> cache forever
+            rospy.loginfo("[vio_bridge] cached %s->%s from TF",
+                          self.vo_body_frame, self.base_frame)
+            return M
+        except Exception as e:
+            rospy.logwarn_throttle(
+                2.0, "[vio_bridge] waiting for TF %s->%s: %s",
+                self.vo_body_frame, self.base_frame, e)
+            return None
+
+    def _to_base_link(self, pose):
+        """Return (px,py,pz, ox,oy,oz,ow) of base_link in the VO world.
+
+        If no vo_body_frame is configured (RTAB path), pass the VO pose
+        through unchanged.
+        """
+        p = pose.position
+        o = pose.orientation
+        if not self.vo_body_frame:
+            return (p.x, p.y, p.z, o.x, o.y, o.z, o.w)
+        Tbb = self._get_T_body_base()
+        if Tbb is None:
+            # TF not ready yet: pass through (orientation will look off
+            # until TF arrives, but we never block the safety stream).
+            return (p.x, p.y, p.z, o.x, o.y, o.z, o.w)
+        Twb = quaternion_matrix([o.x, o.y, o.z, o.w])
+        Twb[0:3, 3] = [p.x, p.y, p.z]
+        Twbase = _np.dot(Twb, Tbb)
+        tx, ty, tz = translation_from_matrix(Twbase)
+        qx, qy, qz, qw = quaternion_from_matrix(Twbase)
+        return (tx, ty, tz, qx, qy, qz, qw)
+
     # ----- publisher tick -----
     def tick(self, _evt):
         with self.lock:
@@ -436,14 +511,53 @@ class VioBridgeNode:
         # in on_anchor to the landmark fix) at anchor_blend_rate so
         # the output stream is smooth.
         out = PoseStamped()
-        out.header.stamp = now
+        # Stamp with the VO MEASUREMENT time, not now(). PX4 EKF2 inserts
+        # vision_pose into its delayed-measurement buffer by timestamp; if
+        # we lie and say "now", the correction is applied to the wrong
+        # (too-recent) state -> the fused estimate lags and jerks during
+        # motion. Using the VINS odometry stamp lets MAVROS timesync line
+        # it up with the FCU clock correctly. Republished duplicates (tick
+        # 30 Hz > VINS 15 Hz) are ignored by EKF2 as already-processed.
+        out.header.stamp = src.header.stamp
         out.header.frame_id = "map"
-        out.pose.position.x = src.pose.pose.position.x + applied[0]
-        out.pose.position.y = src.pose.pose.position.y + applied[1]
-        out.pose.position.z = src.pose.pose.position.z + applied[2]
-        out.pose.orientation = src.pose.pose.orientation
+        # Compose the VO pose with the (cached, TF-derived) vo_body->base
+        # transform so the published pose is the FLU base_link, not the
+        # camera/IMU optical frame. Identity if vo_body_frame is unset.
+        px, py, pz, ox, oy, oz, ow = self._to_base_link(src.pose.pose)
+        out.pose.position.x = px + applied[0]
+        out.pose.position.y = py + applied[1]
+        out.pose.position.z = pz + applied[2]
+        out.pose.orientation.x = ox
+        out.pose.orientation.y = oy
+        out.pose.orientation.z = oz
+        out.pose.orientation.w = ow
 
-        self.pub.publish(out)
+        if self.use_odometry:
+            # Full odometry: pose (above) + VINS velocity expressed in the
+            # base_link body frame (MAVROS odom expects twist in child frame).
+            odo = Odometry()
+            odo.header.stamp = src.header.stamp
+            odo.header.frame_id = "odom"
+            odo.child_frame_id = "base_link"
+            odo.pose.pose = out.pose
+            vw = src.twist.twist.linear            # VINS velocity in world
+            R = quaternion_matrix([ox, oy, oz, ow])[:3, :3]   # R_world_base
+            vb = R.T.dot([vw.x, vw.y, vw.z])       # -> base_link frame
+            odo.twist.twist.linear.x = float(vb[0])
+            odo.twist.twist.linear.y = float(vb[1])
+            odo.twist.twist.linear.z = float(vb[2])
+            # angular: leave 0 (PX4 uses its own gyro for body rates)
+            # Small diagonal covariance so EKF2 trusts VINS heavily.
+            pc = [0.0] * 36
+            tc = [0.0] * 36
+            for i in range(6):
+                pc[i * 7] = 0.01      # pose: 0.1 m / 0.1 rad std
+                tc[i * 7] = 0.01      # twist
+            odo.pose.covariance = pc
+            odo.twist.covariance = tc
+            self.pub_odom.publish(odo)
+        else:
+            self.pub.publish(out)
 
         with self.lock:
             self.applied_offset = applied

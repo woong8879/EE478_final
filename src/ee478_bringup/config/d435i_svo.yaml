@@ -1,0 +1,80 @@
+label: "D435i_IR_stereo"
+id: d435i0000000000000000000000000001
+# SVO Pro ncamera calib for the RealSense D435i IR stereo + Pixhawk IMU.
+# Intrinsics/distortion/T_B_C are from the Kalibr cam-IMU calibration
+# (cam_imu.bag, 2026-06-01); T_B_C = body_T_cam = inv(Kalibr T_cam_imu),
+# i.e. the same matrices wired into the VINS pixhawk config. Body = Pixhawk
+# IMU (= base_link).
+cameras:
+- camera:
+    label: cam0
+    id: d435i0000000000000000000000000010
+    line-delay-nanoseconds: 0
+    image_height: 480
+    image_width: 640
+    type: pinhole
+    intrinsics:
+      cols: 1
+      rows: 4
+      data: [382.8922545824089, 383.2983342515436, 325.79737511816637, 241.92332996818297]
+    distortion:
+      type: radial-tangential
+      parameters:
+        cols: 1
+        rows: 4
+        data: [-0.006440292952270657, 0.0035890855716624414, 0.0010304335869040836, 0.0006044296118671439]
+  T_B_C:
+    cols: 4
+    rows: 4
+    data: [-0.01542992,  0.22135450,  0.97507133,  0.15366479,
+           -0.99982026,  0.00732886, -0.01748530,  0.01527054,
+           -0.01101661, -0.97516587,  0.22120163,  0.03915979,
+            0.0,         0.0,         0.0,         1.0]
+- camera:
+    label: cam1
+    id: d435i0000000000000000000000000011
+    line-delay-nanoseconds: 0
+    image_height: 480
+    image_width: 640
+    type: pinhole
+    intrinsics:
+      cols: 1
+      rows: 4
+      data: [382.8854998034977, 383.2817293687419, 326.50544041243455, 242.0942720414077]
+    distortion:
+      type: radial-tangential
+      parameters:
+        cols: 1
+        rows: 4
+        data: [-0.005739685692491272, 0.0031076529130812575, 0.0011210600243490767, 0.0006429077862915026]
+  T_B_C:
+    cols: 4
+    rows: 4
+    data: [-0.01681484,  0.22098369,  0.97513254,  0.15284397,
+           -0.99979620,  0.00718124, -0.01886753, -0.03492431,
+           -0.01117208, -0.97525106,  0.22081791,  0.03851086,
+            0.0,         0.0,         0.0,         1.0]
+
+# Pixhawk IMU (/mavros/imu/data_raw). Noise seeds from our static measurement
+# (accel std ~0.066 m/s^2, gyro std ~0.001-0.003 rad/s); SVO continuous-time
+# sigmas, inflated a little. delay_imu_cam = Kalibr timeshift (0.0047 s).
+imu_params:
+  delay_imu_cam: 0.0047
+  max_imu_delta_t: 0.01
+  acc_max: 176.0
+  omega_max: 17
+  sigma_omega_c: 0.004
+  sigma_acc_c: 0.08
+  sigma_omega_bias_c: 0.0001
+  sigma_acc_bias_c: 0.001
+  sigma_integration: 0.0
+  g: 9.81
+  imu_rate: 114
+
+imu_initialization:
+  velocity: [0.0, 0, 0.0]
+  omega_bias: [0.0, 0, 0.0]
+  acc_bias: [0.0, 0.0, 0.0]
+  velocity_sigma: 2.0
+  omega_bias_sigma: 0.01
+  acc_bias_sigma: 0.1

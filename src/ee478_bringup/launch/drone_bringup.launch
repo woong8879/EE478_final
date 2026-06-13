@@ -1,0 +1,142 @@
+<?xml version="1.0"?>
+<!--
+  drone_bringup.launch — THE single drone base-control + config file.
+
+  Every real-drone launch (slam_assist_vins, mission, s1..s8 subtasks)
+  includes THIS file for the base stack, so there is ONE place to edit
+  drone settings. It brings up:
+      MAVROS + base_link->camera TF   (px4_real.launch)
+      RealSense IR stereo + IMU + depth cloud   (realsense_d435i_vins.launch)
+      VINS-Fusion + vio_bridge -> /mavros/vision_pose/pose   (vins_real.launch)
+      TF tree (map->odom->base_link->camera + map->world)
+
+  It does NOT arm, take off, or run a planner/mission — callers add that
+  layer on top (e.g. offboard_controller in the subtask launches).
+
+  Override any CONFIG value at launch, e.g.:
+      roslaunch ee478_bringup slam_assist_vins.launch vins_mode:=vio_px4
+-->
+<launch>
+  <!-- ============================================================== -->
+  <!-- ==================  CONFIG (single source of truth)  ========= -->
+  <!--  Edit drone settings HERE. All launches inherit these.         -->
+  <!-- ============================================================== -->
+
+  <!-- Flight controller (Holybro Kakute H7 over UART). -->
+  <arg name="fcu_url" default="serial:///dev/ttyTHS0:921600"/>
+
+  <!-- base_link -> camera_link mount: "x y z yaw pitch roll" (m, rad).
+       From Kalibr (cam_imu.bag): camera is ~0.154 m fwd / 0.039 m up of the
+       Pixhawk IMU(=base_link), optical axis tilted 12.78 deg UP
+       (pitch=-0.2231). RealSense publishes camera_link->optical itself, so
+       only the mount tilt goes here. Used for the depth cloud (EGO) + RViz;
+       VINS vio_px4 uses the full Kalibr body_T_cam internally instead. -->
+  <arg name="mount_tf" default="0.154 0.015 0.039 0 -0.2231 0"/>
+
+  <!-- VO backend:  svo  = SVO Pro pure stereo VO (svo_real.launch) [DEFAULT]
+                    vins = VINS-Fusion (vins_real.launch, see vins_mode)
+       SVO is the default backend. VINS-Fusion is kept intact but no longer
+       runs unless explicitly selected with estimator:=vins. -->
+  <arg name="estimator" default="svo"/>
+  <!-- VINS source (only when estimator=vins):
+                     vio = stereo + camera IMU (default)
+                     vo  = pure stereo VO (no IMU)
+                     vio_px4 = stereo + Pixhawk IMU (low-vibration) -->
+  <arg name="vins_mode" default="vio"/>
+
+  <!-- Camera / perception. Colour ON small (424x240@15): the delivery phase
+       needs forward RGB for YOLO and realsense ros1 cannot start a stream at
+       runtime (in-flight node restart = USB re-enum = VIO death), so the
+       driver-level stream runs from boot. The TOPIC is gated by
+       delivery_trigger (publishes at 10 Hz only after the near-tag trigger). -->
+  <arg name="enable_color" default="true"/>
+  <arg name="emitter"      default="1"/>
+  <arg name="color_width"  default="424"/>
+  <arg name="color_height" default="240"/>
+
+  <!-- ============================================================== -->
+  <!-- ==================  BASE CONTROL (mechanism)  ================ -->
+  <!-- ============================================================== -->
+
+  <!-- MAVROS + static base_link->camera_link TF -->
+  <include file="$(find ee478_bringup)/launch/px4_real.launch">
+    <arg name="fcu_url"        value="$(arg fcu_url)"/>
+    <arg name="base_to_cam_tf" value="$(arg mount_tf)"/>
+  </include>
+
+  <!-- RealSense: IR stereo + IMU for VINS, depth cloud for EGO-Planner -->
+  <include file="$(find ee478_bringup)/launch/realsense_d435i_vins.launch">
+    <arg name="enable_color"  value="$(arg enable_color)"/>
+    <arg name="emitter"       value="$(arg emitter)"/>
+    <arg name="color_width"   value="$(arg color_width)"/>
+    <arg name="color_height"  value="$(arg color_height)"/>
+  </include>
+
+  <!-- VO backend: VINS-Fusion or SVO Pro -> both feed /mavros/vision_pose/pose -->
+  <group if="$(eval estimator == 'vins')">
+    <include file="$(find ee478_localization)/launch/vins_real.launch">
+      <arg name="mode" value="$(arg vins_mode)"/>
+    </include>
+  </group>
+  <group if="$(eval estimator == 'svo')">
+    <include file="$(find ee478_localization)/launch/svo_real.launch"/>
+  </group>
+
+  <!-- TF: map->odom (static) -> base_link (from /mavros/local_position) ->
+       camera_link (mount) -> camera_*_optical (RealSense).
+       world<->map (identity) ties the VO "world" frame to our "map".
+       NOTE the direction: world->map, NOT map->world. SVO's visualizer
+       hard-codes a TF broadcast "cam_pos"->"world" (world as a CHILD of the
+       moving camera frame; its publish_world_in_cam_frame param is dead code
+       and never gates it). If we also published map->world, "world" would
+       have TWO parents (map + cam_pos) -> broken TF tree -> RViz errors on
+       every world-frame display. Publishing world->map instead makes "map"
+       a child of "world", so "world" keeps its single SVO parent and the
+       tree stays consistent: cam_pos->world->map->odom->base_link->camera.
+       (VINS mode is unaffected: it doesn't reparent world, so world->map
+       just makes world the root there.) -->
+  <node pkg="ee478_localization" type="odom_tf_broadcaster_node.py"
+        name="odom_tf_broadcaster" output="screen"/>
+  <node pkg="tf2_ros" type="static_transform_publisher"
+        name="map_to_odom"  args="0 0 0 0 0 0 map odom"/>
+  <node pkg="tf2_ros" type="static_transform_publisher"
+        name="world_to_map" args="0 0 0 0 0 0 world map"/>
+
+  <!-- Monitoring trails for RViz (tiny, viz-only): accumulate the EKF pose,
+       the relayed vision pose, and the RAW SVO odom into nav_msgs/Path
+       (/ekf_path, /vio_path, /svo_path). With this here, a ground laptop only
+       needs `rviz -d svo_monitor.rviz` — no separate pose_to_path step. -->
+  <node pkg="ee478_bringup" type="pose_to_path_node.py" name="pose_to_path"
+        output="screen">
+    <param name="topics"
+           value="/mavros/local_position/pose:/ekf_path,/mavros/vision_pose/pose:/vio_path,/svo/pose_imu:/svo_path"/>
+  </node>
+
+  <!-- AprilTag node: ALWAYS runs for tag DETECTION (/apriltag/detections, ids +
+       ranges; consumed by the gate-quiz checker and the delivery trigger). The
+       EKF-touching anchor CORRECTION stays opt-in via apriltag_anchor:=true
+       (it destabilised a flight; z is now excluded but it remains off). -->
+  <arg name="apriltag_anchor" default="false"/>
+  <include file="$(find ee478_localization)/launch/apriltag_anchor.launch">
+    <arg name="emit_anchor" value="$(arg apriltag_anchor)"/>
+  </include>
+
+  <!-- Delivery camera system: downward 2nd D435i + near-store-tag trigger +
+       YOLOv11. RGB topics (/delivery/down_rgb, /delivery/main_rgb @10 Hz)
+       start only when a store tag 271/274/275/276 is seen within 0.5 m.
+       delivery:=false to leave the 2nd camera system out. -->
+  <arg name="delivery" default="true"/>
+  <include if="$(arg delivery)"
+           file="$(find ee478_bringup)/launch/delivery_cameras.launch"/>
+
+  <!-- Flight recorder: one timestamped rosbag per launch in ~/flight_logs/
+       (pose / VIO / EKF / nav goals / EGO trajectory / setpoints / camera).
+       ON by default -> record:=false to disable; record_images:=false for
+       small (no-image) bags. -->
+  <arg name="record"        default="true"/>
+  <arg name="record_images" default="true"/>
+  <include if="$(arg record)"
+           file="$(find ee478_bringup)/launch/record.launch">
+    <arg name="record_images" value="$(arg record_images)"/>
+  </include>
+</launch>

@@ -5,9 +5,32 @@
 # ROS Noetic
 source /opt/ros/noetic/setup.bash
 
-# Our catkin workspace
+# ROS networking: advertise the routable IP (NOT the hostname), else a ground
+# laptop's RViz can't resolve "team5-desktop" and fails to connect. Picks the
+# source IP of the default route (the WiFi/LAN IP), auto-updates on DHCP.
+# Override by exporting ROS_IP before sourcing (e.g. USB-tether 192.168.55.1).
+if [ -z "${ROS_IP:-}" ]; then
+  _ros_ip=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[0-9.]+' | head -1)
+  [ -n "$_ros_ip" ] && export ROS_IP="$_ros_ip"
+fi
+
+# Vendored realsense-ros (realsense2_camera) lives in ~/catkin_ws. Our
+# workspace is built on top of it, so sourcing our devel below chains
+# back here; this explicit line is a fallback for fresh/clean trees.
+CATKIN_WS="${CATKIN_WS:-$HOME/catkin_ws}"
+if [ -f "$CATKIN_WS/devel/setup.bash" ]; then
+  source "$CATKIN_WS/devel/setup.bash"
+fi
+
+# Our catkin workspace (overlays ~/catkin_ws when built on top of it)
 if [ -f "$(dirname "$BASH_SOURCE")/devel/setup.bash" ]; then
-  source "$(dirname "$BASH_SOURCE")/devel/setup.bash"
+  source "$(dirname "$BASH_SOURCE")/devel/setup.bash" --extend
+fi
+
+# SVO Pro workspace overlay (svo_ros etc.) so estimator:=svo can find svo_node.
+# Present only once svo_ws is built; harmless otherwise.
+if [ -f "$HOME/svo_ws/devel/setup.bash" ]; then
+  source "$HOME/svo_ws/devel/setup.bash" --extend
 fi
 
 # PX4 SITL + Gazebo Classic (sim only; on the real drone this block is a no-op)

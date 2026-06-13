@@ -14,7 +14,7 @@
         max_vel:=0.4
 -->
 <launch>
-  <arg name="platform"   default="sim"/>
+  <arg name="platform"   default="real"/>
   <arg name="vio_source" default="gt"/>
   <arg name="hover_z"
        default="$(eval 0.5 if arg('platform') == 'real' else 0.7)"/>
@@ -25,7 +25,7 @@
   <arg name="max_vel"
        default="$(eval 0.4 if arg('platform') == 'real' else 1.0)"/>
   <arg name="fcu_url"
-       default="serial:///dev/ttyTHS1:921600"/>
+       default="serial:///dev/ttyTHS0:921600"/>
 
   <include file="$(find ee478_bringup)/launch/subtasks/s1_takeoff.launch">
     <arg name="platform"   value="$(arg platform)"/>
@@ -37,18 +37,25 @@
   <arg name="cloud_topic"
        default="$(eval '/iris_depth_camera_vio/camera/depth/points'
                        if arg('platform') == 'sim'
-                       else '/camera/depth/color/points')"/>
+                       else '/camera/depth/points')"/>
   <include file="$(find ee478_planner)/launch/ego_planner.launch">
+    <arg name="platform"         value="$(arg platform)"/>
     <arg name="cloud_topic"      value="$(arg cloud_topic)"/>
     <arg name="planning_horizon" value="3.0"/>
     <arg name="max_vel"          value="$(arg max_vel)"/>
   </include>
 
+  <!-- $(eval ...) must be the WHOLE attribute value, so the pre/through
+       gate x offsets are computed here as their own args rather than
+       embedded inside the rostopic args strings below. -->
+  <arg name="pre_gate_x"     default="$(eval gate_x + 1.0)"/>
+  <arg name="through_gate_x" default="$(eval gate_x - 1.0)"/>
+
   <node pkg="rostopic" type="rostopic"
         name="return_leg1_pre_gate"
         args="pub -l -r 1.0 /next_goal geometry_msgs/PoseStamped
               '{header: {frame_id: map},
-                pose: {position: {x: $(eval gate_x + 1.0),
+                pose: {position: {x: $(arg pre_gate_x),
                                   y: $(arg gate_y),
                                   z: $(arg hover_z)},
                        orientation: {w: 1.0}}}'"
@@ -58,7 +65,7 @@
         name="return_leg2_through_gate"
         args="pub -l -r 1.0 /next_goal geometry_msgs/PoseStamped
               '{header: {frame_id: map},
-                pose: {position: {x: $(eval gate_x - 1.0),
+                pose: {position: {x: $(arg through_gate_x),
                                   y: $(arg gate_y),
                                   z: $(arg hover_z)},
                        orientation: {w: 1.0}}}'"

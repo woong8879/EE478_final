@@ -143,7 +143,14 @@ class EgoBridgeNode:
         out.header.stamp = rospy.Time.now()
         out.header.frame_id = self.world_frame
         out.coordinate_frame = PositionTarget.FRAME_LOCAL_NED
-        out.type_mask = 0
+        # Track position + velocity feedforward but IGNORE acceleration (and
+        # yaw_rate): the accel feedforward -- especially its spikes on every
+        # replan -- makes PX4 jerk hard ("모션 너무 공격적") and shakes the VIO.
+        # pos+vel is smooth and plenty accurate at these speeds.
+        out.type_mask = (PositionTarget.IGNORE_AFX
+                         | PositionTarget.IGNORE_AFY
+                         | PositionTarget.IGNORE_AFZ
+                         | PositionTarget.IGNORE_YAW_RATE)
         out.position.x = cmd.position.x
         out.position.y = cmd.position.y
         z_raw = cmd.position.z

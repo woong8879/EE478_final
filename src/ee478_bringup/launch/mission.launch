@@ -59,11 +59,10 @@
         name="odom_tf_broadcaster" output="screen"/>
 
   <!-- VINS path: pre-flight excitation + SIM-ONLY landmark anchor.
-       Both are vestiges of the mono+IMU scale-init effort and are
-       NOT used by the RTAB-Map RGBD path (which is what the real
-       drone will run). They stay in the tree so the VINS launch
-       still works for reference; mission.launch leaves them OFF for
-       the rtabmap and gt arms. -->
+       Both are vestiges of the mono+IMU scale-init effort. The real
+       drone runs stereo-inertial VINS (scale from the IR baseline), so
+       excitation is not needed there; they stay for the sim/reference
+       VINS arm only and are OFF for the gt arm. -->
   <group if="$(eval vio_source == 'vins')">
     <node pkg="ee478_localization" type="vins_excitation_node.py"
           name="vins_excitation" output="screen">

@@ -1,0 +1,63 @@
+<?xml version="1.0"?>
+<!--
+  Flight recorder. One timestamped rosbag PER LAUNCH in ~/flight_logs/, so every
+  run is captured for later review (pose / VIO / EKF / nav goals / EGO trajectory
+  / setpoints / camera). Included by drone_bringup -> records on EVERY launch.
+
+  Two bags so the small state log isn't bloated by images:
+    flight_<stamp>.bag      pose / nav / control / state / EGO obstacle map
+    flight_img_<stamp>.bag  IR + depth images              (large, toggle)
+
+  Disable entirely:  record:=false   (arg on drone_bringup)
+  Drop images only:  record_images:=false
+  Inspect later:     rosbag info ~/flight_logs/flight_*.bag
+                     rqt_bag / rosbag play ~/flight_logs/flight_*.bag
+-->
+<launch>
+  <arg name="record_images" default="true"/>
+  <arg name="bag_dir"       default="$(env HOME)/flight_logs"/>
+
+  <!-- POSE / NAV-direction / CONTROL / STATE (small, always on) -->
+  <node pkg="rosbag" type="record" name="flight_rec" output="screen"
+        args="-o $(arg bag_dir)/flight --lz4 --split --size=2048
+              /tf /tf_static
+              /mavros/state
+              /mavros/local_position/pose
+              /mavros/local_position/velocity_local
+              /mavros/imu/data
+              /mavros/vision_pose/pose
+              /mavros/odometry/out
+              /svo/pose_imu
+              /mavros/setpoint_raw/local
+              /mavros/setpoint_raw/target_local
+              /offboard/cmd_raw
+              /offboard/goal
+              /next_goal
+              /goal_reached
+              /drone_0_planning/pos_cmd
+              /ekf_path /vio_path /svo_path
+              /drone_0_ego_planner_node/grid_map/occupancy_inflate
+              /drone_0_ego_planner_node/grid_map/occupancy
+              /drone_0_ego_planner_node/planning/trajectory
+              /drone_0_ego_planner_node/planning/data_display
+              /landmark_anchor_pose
+              /apriltag/detections
+              /gate_quiz/answer /gate_quiz/passed
+              /final_mission/state
+              /delivery/active
+              /delivery/yolo/detections
+              /delivery/yolo_front/detections
+              /precision_land/state
+              /camera/infra1/camera_info
+              /rosout"/>
+
+  <!-- CAMERA IMAGES (large; record_images:=false for small bags) -->
+  <node if="$(arg record_images)" pkg="rosbag" type="record"
+        name="flight_rec_img" output="screen"
+        args="-o $(arg bag_dir)/flight_img --lz4 --split --size=2048
+              /camera/infra1/image_rect_raw
+              /camera/depth/image_rect_raw
+              /delivery/down_rgb
+              /delivery/main_rgb
+              /delivery/yolo/image"/>
+</launch>

@@ -1,0 +1,91 @@
+Panels:
+  - Class: rviz/Displays
+    Name: Displays
+    Property Tree Widget:
+      Expanded: ~
+    Tree Height: 700
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz/Grid
+      Name: Grid
+      Enabled: true
+      Color: 120; 120; 130
+      Cell Size: 1
+      Plane Cell Count: 20
+      Reference Frame: map
+      Value: true
+    - Class: rviz/TF
+      Name: TF
+      Enabled: true
+      Show Names: true
+      Show Axes: true
+      Marker Scale: 0.4
+      Value: true
+    - Class: rviz/PointCloud2
+      Name: EGO obstacle map (z-colored)
+      Enabled: true
+      Topic: /drone_0_ego_planner_node/grid_map/occupancy_inflate
+      Queue Size: 5
+      Style: Boxes
+      Size (m): 0.1
+      Color Transformer: AxisColor
+      Axis: Z
+      Autocompute Value Bounds: false
+      Min Value: 0
+      Max Value: 1.5
+      Decay Time: 0
+      Value: true
+    - Class: rviz/Marker
+      Name: EGO trajectory
+      Enabled: true
+      Marker Topic: /drone_0_ego_planner_node/optimal_list
+      Queue Size: 10
+      Value: true
+    - Class: rviz/Marker
+      Name: EGO goal
+      Enabled: true
+      Marker Topic: /drone_0_ego_planner_node/goal_point
+      Queue Size: 10
+      Value: true
+    - Class: rviz/Pose
+      Name: Drone (SVO pose)
+      Enabled: true
+      Topic: /mavros/local_position/pose
+      Queue Size: 10
+      Shape: Axes
+      Axes Length: 0.4
+      Axes Radius: 0.05
+      Value: true
+  Enabled: true
+  Global Options:
+    Background Color: 28; 28; 34
+    Fixed Frame: map
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz/MoveCamera
+    - Class: rviz/Select
+    - Class: rviz/FocusCamera
+    - Class: rviz/Measure
+    - Class: rviz/SetGoal
+      Topic: /move_base_simple/goal
+  Value: true
+  Views:
+    Current:
+      Class: rviz/Orbit
+      Name: Current View
+      Distance: 7
+      Focal Point:
+        X: 1.5
+        Y: 0
+        Z: 0.5
+      Pitch: 0.5
+      Yaw: 3.1
+      Target Frame: map
+    Saved: ~
+Window Geometry:
+  Height: 900
+  Width: 1400
+  Displays:
+    collapsed: false

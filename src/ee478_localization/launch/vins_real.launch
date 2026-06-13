@@ -1,0 +1,69 @@
+<?xml version="1.0"?>
+<!--
+  VINS-Fusion odometry for the real drone, bridged to PX4.
+
+  mode:=vio  (default) -> stereo IR + IMU (visual-inertial). Publishes
+                          /vins_estimator/imu_propagate (200 Hz, ~5 ms
+                          latency); bridge uses that for low-latency EV.
+  mode:=vo             -> pure stereo VO (imu disabled in the config).
+                          No imu_propagate is published, so the bridge
+                          falls back to /vins_estimator/odometry, and the
+                          VINS body frame is cam0 (left IR) not the IMU.
+
+  Consumes (from realsense_d435i_vins.launch):
+    /camera/infra1/image_rect_raw, /camera/infra2/image_rect_raw, /camera/imu
+  Publishes:
+    -> vio_bridge -> /mavros/vision_pose/pose
+-->
+<launch>
+  <arg name="mode" default="vio"/>            <!-- vio | vo | vio_px4 -->
+  <arg name="enable_loop_fusion" default="false"/>
+  <arg name="cfgdir" default="$(find vins)/../config/realsense_d435i"/>
+
+  <!-- mode-dependent selections:
+       vio      = stereo + camera IMU (BMI055, at the camera = vibration-prone)
+       vo       = pure stereo VO (no IMU)
+       vio_px4  = stereo + Pixhawk IMU (/mavros/imu/data_raw, low vibration) -->
+  <arg name="config"
+       default="$(eval cfgdir + '/realsense_stereo_imu_config.yaml' if mode == 'vio' else (cfgdir + '/realsense_stereo_vo_config.yaml' if mode == 'vo' else cfgdir + '/realsense_stereo_pixhawk_config.yaml'))"/>
+  <!-- imu modes have imu_propagate (low latency); pure VO only has /odometry. -->
+  <arg name="vo_topic"
+       default="$(eval '/vins_estimator/odometry' if mode == 'vo' else '/vins_estimator/imu_propagate')"/>
+  <!-- VINS body frame: camera-IMU optical (vio), cam0 optical (vo), or
+       Pixhawk FLU = base_link (vio_px4, already FLU so no rotation needed). -->
+  <arg name="vo_body_frame"
+       default="$(eval 'camera_imu_optical_frame' if mode == 'vio' else ('camera_infra1_optical_frame' if mode == 'vo' else 'base_link'))"/>
+
+  <!-- launch-prefix taskset: keep heavy nodes OFF cores 0,1 so the RealSense
+       camera nodelet (in the realsense include, can't be pinned directly)
+       keeps cores 0,1 to itself and never starves -> no stream drops.
+       Automatic at launch; no need to run pin_cpu.sh by hand. -->
+  <node pkg="vins" type="vins_node" name="vins_estimator"
+        args="$(arg config)" output="screen"
+        launch-prefix="taskset -c 2-5"/>
+
+  <group if="$(arg enable_loop_fusion)">
+    <node pkg="loop_fusion" type="loop_fusion_node" name="loop_fusion"
+          args="$(arg config)" output="screen"/>
+  </group>
+
+  <!-- VINS pose -> PX4 vision pose. vio_bridge applies covariance / jump
+       safety gates and rotates the optical-frame pose into FLU base_link. -->
+  <node pkg="ee478_localization" type="vio_bridge_node.py"
+        name="vio_bridge" output="screen"
+        launch-prefix="taskset -c 2-5">
+    <param name="vo_topic"          value="$(arg vo_topic)"/>
+    <param name="vision_pose_topic" value="/mavros/vision_pose/pose"/>
+    <param name="bootstrap_enabled" value="false"/>
+    <param name="max_jump_m"        value="0.5"/>
+    <param name="max_cov_m2"        value="1.0"/>
+    <param name="rate_hz"           value="30.0"/>
+    <!-- VINS reports the OPTICAL frame pose. vio_bridge rotates it into FLU
+         base_link via the TF tree (RealSense camera_link->*_optical +
+         base_link->camera_link mount in px4_real.launch). Fix the mount
+         angle there and this follows automatically. -->
+    <param name="vo_body_frame" value="$(arg vo_body_frame)"/>
+    <param name="base_frame"    value="base_link"/>
+    <param name="use_odometry"  value="false"/>
+  </node>
+</launch>

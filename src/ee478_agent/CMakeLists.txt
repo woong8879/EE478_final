@@ -11,5 +11,9 @@ catkin_install_python(PROGRAMS
   scripts/signature_move_node.py
   scripts/mission_fsm_node.py
   scripts/land_node.py
+  scripts/llm_agent_core_node.py
+  scripts/gate_quiz_node.py
+  scripts/precision_land_node.py
+  scripts/final_mission_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

@@ -1,0 +1,42 @@
+<?xml version="1.0"?>
+<!--
+  DOWNWARD delivery camera (2nd D435i, serial 034422072213) — RGB ONLY.
+
+  Used in the delivery phase: when the drone is within 0.5 m of one of the
+  store tags (271/274/275/276), delivery_trigger starts republishing this
+  camera's RGB at 10 Hz (/delivery/down_rgb) and YOLOv11 (best.pt) runs on it.
+
+  Driver-level stream runs from boot (realsense ros1 cannot start a stream at
+  runtime, and an in-flight node restart = USB re-enum = main-cam/VIO risk).
+  COLOR ONLY at 424x240@15 -> tiny USB/CPU load; no depth/IR/IMU. The topic the
+  mission consumes is the GATED one from delivery_trigger, so "the camera does
+  not operate" until the trigger, as far as the pipeline is concerned.
+-->
+<launch>
+  <arg name="serial_no"    default="034422072213"/>
+  <arg name="camera"       default="down_camera"/>   <!-- namespace -->
+  <arg name="color_width"  default="424"/>
+  <arg name="color_height" default="240"/>
+  <!-- D435i color supports 6/15/30/60 fps (NOT 10): stream 15, the gated
+       delivery relay downsamples to the required 10 Hz. -->
+  <arg name="color_fps"    default="15"/>
+
+  <include file="$(find realsense2_camera)/launch/rs_camera.launch">
+    <arg name="camera"        value="$(arg camera)"/>
+    <arg name="serial_no"     value="$(arg serial_no)"/>
+    <arg name="initial_reset" value="false"/>
+
+    <arg name="enable_color"  value="true"/>
+    <arg name="color_width"   value="$(arg color_width)"/>
+    <arg name="color_height"  value="$(arg color_height)"/>
+    <arg name="color_fps"     value="$(arg color_fps)"/>
+
+    <arg name="enable_depth"  value="false"/>
+    <arg name="enable_infra1" value="false"/>
+    <arg name="enable_infra2" value="false"/>
+    <arg name="enable_gyro"   value="false"/>
+    <arg name="enable_accel"  value="false"/>
+    <arg name="enable_pointcloud" value="false"/>
+    <arg name="publish_tf"    value="false"/>
+  </include>
+</launch>

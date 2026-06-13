@@ -1,0 +1,86 @@
+<?xml version="1.0"?>
+<!--
+  FINAL — LAST GATE + LANDING only (test slice of final.launch).
+  =============================================================
+  Take off RIGHT IN FRONT of the last gate, FACING the gate, then:
+    quiz -> pick LEFT/RIGHT opening -> fly through -> search the target box ->
+    approach -> climb 1 m -> centre the box top -> land ON the box.
+
+  Coords are LOCAL to THIS takeoff spot (map origin = where you take off,
+  +x = the drone's forward = TOWARD the gate). So:
+    * PLACE the drone ~2 m in front of the gate's monitor, pointing AT the gate.
+    * gate openings are 2 m ahead, +-1 m to the sides (271/274 on the drone's
+      LEFT, 275/276 on its RIGHT). The live tag-midpoint refine fixes small
+      placement error (within ~0.8 m).
+
+  RUN
+    export OPENAI_API_KEY=sk-...
+    roslaunch ee478_bringup final_lastgate.launch target:=cafe
+-->
+<launch>
+  <arg name="platform"   default="real"/>
+  <arg name="vio_source" default="gt"/>
+  <arg name="hover_z"    default="0.7"/>
+  <arg name="target"     default="cafe"/>
+  <arg name="max_vel"
+       default="$(eval 0.3 if arg('platform') == 'real' else 1.0)"/>
+  <arg name="fcu_url"    default="serial:///dev/ttyTHS0:921600"/>
+  <arg name="api_key"    default="$(optenv OPENAI_API_KEY)"/>
+
+  <include file="$(find ee478_bringup)/launch/subtasks/s1_takeoff.launch">
+    <arg name="platform"   value="$(arg platform)"/>
+    <arg name="vio_source" value="$(arg vio_source)"/>
+    <arg name="hover_z"    value="$(arg hover_z)"/>
+    <arg name="fcu_url"    value="$(arg fcu_url)"/>
+  </include>
+
+  <arg name="cloud_topic"
+       default="$(eval '/iris_depth_camera_vio/camera/depth/points'
+                       if arg('platform') == 'sim'
+                       else '/camera/depth/points')"/>
+  <arg name="z_band" default="0.2"/>
+  <arg name="max_acc" default="0.3"/>
+  <arg name="max_jer" default="2.0"/>
+  <include file="$(find ee478_planner)/launch/ego_planner.launch">
+    <arg name="platform"         value="$(arg platform)"/>
+    <arg name="cloud_topic"      value="$(arg cloud_topic)"/>
+    <arg name="planning_horizon" value="3.0"/>
+    <arg name="max_vel"          value="$(arg max_vel)"/>
+    <arg name="max_acc"          value="$(arg max_acc)"/>
+    <arg name="max_jer"          value="$(arg max_jer)"/>
+    <arg name="hover_z"          value="$(arg hover_z)"/>
+    <arg name="virtual_ceil"     value="$(eval arg('hover_z') + arg('z_band') + 0.6)"/>
+    <arg name="virtual_ground"   value="-1.0"/>
+  </include>
+
+  <!-- single LOCAL-frame gate (the last gate), in front of the takeoff spot -->
+  <node pkg="ee478_agent" type="final_mission_node.py" name="final_mission"
+        output="screen" launch-prefix="taskset -c 2-5">
+    <param name="api_key" value="$(arg api_key)"/>
+    <param name="target"  value="$(arg target)"/>
+    <param name="hover_z" value="$(arg hover_z)"/>
+    <param name="start_gate" value="1"/>
+    <rosparam param="gates">
+      - name: last_gate
+        pre_wps: [[0.8, 0.0]]
+        quiz: [0.8, 0.0]
+        axis: x
+        sign: 1.0
+        left:  {c: [2.0, 1.0],  tags: [271, 274]}
+        right: {c: [2.0, -1.0], tags: [275, 276]}
+    </rosparam>
+  </node>
+
+  <node pkg="ee478_agent" type="precision_land_node.py" name="precision_land"
+        output="screen" launch-prefix="taskset -c 2-5">
+    <param name="auto"         value="false"/>
+    <param name="target_label" value="$(arg target)"/>
+    <param name="hover_z"      value="$(arg hover_z)"/>
+    <rosparam>
+      down_cam_back_m: 0.145
+      box_height_m: 0.26
+      prep_z: 1.0
+      search_max_m: 2.5
+    </rosparam>
+  </node>
+</launch>

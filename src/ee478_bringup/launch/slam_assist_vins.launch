@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<!--
+  slam_assist_vins.launch — SLAM-assisted MANUAL flight (VINS-Fusion).
+
+  Just the drone base stack (drone_bringup.launch): MAVROS + RealSense +
+  VINS + vio_bridge + TF. No offboard / auto-arm — pilot flies manually
+  with RC; VINS pose feeds PX4 EKF2 for GPS-denied position hold. The
+  depth cloud still streams for EGO-Planner (planning is decoupled).
+
+  All drone config lives in drone_bringup.launch; override here, e.g.:
+    roslaunch ee478_bringup slam_assist_vins.launch vins_mode:=vio_px4
+-->
+<launch>
+  <arg name="fcu_url"      default="serial:///dev/ttyTHS0:921600"/>
+  <arg name="estimator"    default="svo"/>     <!-- svo (default) | vins -->
+  <arg name="vins_mode"    default="vio"/>     <!-- vio | vo | vio_px4 (estimator=vins) -->
+  <arg name="enable_color" default="true"/>
+
+  <include file="$(find ee478_bringup)/launch/drone_bringup.launch">
+    <arg name="fcu_url"      value="$(arg fcu_url)"/>
+    <arg name="estimator"    value="$(arg estimator)"/>
+    <arg name="vins_mode"    value="$(arg vins_mode)"/>
+    <arg name="enable_color" value="$(arg enable_color)"/>
+  </include>
+</launch>

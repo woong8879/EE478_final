@@ -1,0 +1,12 @@
+#Pixhawk IMU (/mavros/imu/data_raw) noise model for Kalibr.
+#Seed values from our static measurement (accel std ~0.066 m/s^2, gyro std
+#~0.001-0.003 rad/s) inflated a little for the random-walk / unmodelled
+#terms. Kalibr is fairly tolerant of these; tune later from an Allan
+#deviation if needed.
+rostopic: /mavros/imu/data_raw
+update_rate: 173.0          # measured ~173 Hz
+
+accelerometer_noise_density: 0.08     # [m/s^2/sqrt(Hz)]
+accelerometer_random_walk:   0.001    # [m/s^3/sqrt(Hz)]
+gyroscope_noise_density:     0.004    # [rad/s/sqrt(Hz)]
+gyroscope_random_walk:       0.0001   # [rad/s^2/sqrt(Hz)]

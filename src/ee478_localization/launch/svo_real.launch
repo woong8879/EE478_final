@@ -1,0 +1,59 @@
+<?xml version="1.0"?>
+<!--
+  svo_real.launch — SVO Pro PURE STEREO VO (no IMU) for the real drone, as an
+  alternative VO backend to VINS-Fusion (vins_real.launch). Selected via
+  drone_bringup.launch estimator:=svo.
+
+  SVO runs as plain visual odometry: stereo gives metric scale from the IR
+  baseline, so it initializes on the first frame with no init wiggle and no
+  IMU. The Pixhawk IMU is NOT fed to SVO — it is fused downstream by PX4 EKF2
+  (vision_pose + IMU). Config: ee478_bringup/config/svo_vo_stereo.yaml.
+
+  Consumes (from realsense_d435i_vins.launch):
+    /camera/infra1/image_rect_raw, /camera/infra2/image_rect_raw
+  Publishes:
+    /svo/pose_imu (= T_world_body, frontend) -> svo_vision_relay
+      -> /mavros/vision_pose/pose
+
+  Requires the svo_ws overlay on the path (setup_env.sh chains it) so
+  $(find svo_ros) resolves. Camera calib (intrinsics + T_B_C): d435i_svo.yaml.
+-->
+<launch>
+  <arg name="calib_file" default="$(find ee478_bringup)/config/d435i_svo.yaml"/>
+  <arg name="runlc"      default="false"/>   <!-- loop closure off by default -->
+
+  <!-- SVO Pro stereo-VO node. Pinned to cores 2-5 (cores 0,1 reserved for the
+       camera nodelet); shares 2-5 with cloud + planner + YOLO. No imu_topic:
+       pure VO (use_imu:False in svo_vo_stereo.yaml). -->
+  <!-- Start SVO immediately so the EKF always has vision aiding (no
+       dead-reckoning divergence). SVO may init on the first blurry AUTO
+       frames, but that no longer matters: the offboard_controller latches
+       the takeoff origin at ARM (after convergence), so startup jumps /
+       baseline resets don't bias the start position, and SVO's map
+       self-heals as sharp (fixed-exposure) keyframes replace the blurry
+       initial ones. -->
+  <node pkg="svo_ros" type="svo_node" name="svo" clear_params="true"
+        output="screen" args="--v=0" launch-prefix="taskset -c 2-5">
+    <param name="cam0_topic" value="/camera/infra1/image_rect_raw" type="str"/>
+    <param name="cam1_topic" value="/camera/infra2/image_rect_raw" type="str"/>
+    <param name="calib_file" value="$(arg calib_file)"/>
+    <rosparam file="$(find ee478_bringup)/config/svo_vo_stereo.yaml"/>
+    <param name="runlc" value="$(arg runlc)"/>
+  </node>
+
+  <!-- SVO body pose (= base_link via Kalibr T_B_C) -> PX4 external vision.
+       ev_mode=odom (default): one Odometry msg (pose+velocity+covariances) to
+       /mavros/odometry/out -> EKF2_EV_CTRL=15 fuses pos+vel+yaw. The explicit
+       tight pose covariance makes the EKF actually track VIO, and the VIO
+       velocity cancels the accel-Z phantom-climb so altitude holds w/o baro.
+       FALLBACK: set ev_mode:=pose to revert to the plain vision_pose path. -->
+  <arg name="ev_mode" default="odom"/>
+  <node pkg="ee478_localization" type="svo_vision_relay_node.py"
+        name="svo_vision_relay" output="screen" launch-prefix="taskset -c 2-5">
+    <param name="ev_mode"           value="$(arg ev_mode)"/>
+    <param name="in_topic"          value="/svo/pose_imu"/>
+    <param name="vision_pose_topic" value="/mavros/vision_pose/pose"/>
+    <param name="max_jump_m"        value="0.5"/>
+    <param name="frame_id"          value="map"/>
+  </node>
+</launch>

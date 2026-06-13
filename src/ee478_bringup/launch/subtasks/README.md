@@ -5,7 +5,7 @@ Every launch takes `platform:={sim,real}`.
 - `platform:=sim` (default) brings up PX4 SITL + Gazebo + GT vision
   bridge + sim perception stubs. Reproducible regression test.
 - `platform:=real` brings up MAVROS connecting to the Pixhawk over
-  UART (`fcu_url:=serial:///dev/ttyTHS1:921600` by default) + RTAB-Map
+  USB CDC-ACM (`fcu_url:=serial:///dev/ttyTHS0:921600` by default, Holybro Kakute H7) + RTAB-Map
   on the depth camera + vio_bridge. **`auto_arm` is forced FALSE**;
   the operator arms via QGroundControl or the RC after verifying
   battery + RC failsafe + clear test area.
@@ -33,7 +33,7 @@ Before launching anything with `platform:=real`:
     roslaunch ee478_bringup s1_takeoff.launch platform:=sim
     # Real
     roslaunch ee478_bringup s1_takeoff.launch platform:=real \
-        fcu_url:=serial:///dev/ttyTHS1:921600 hover_z:=0.5
+        fcu_url:=serial:///dev/ttyTHS0:921600 hover_z:=0.5
 PASS: drone climbs to hover_z within 30 s and stays armed + OFFBOARD.
 
 ### 2. Command read (`s2_command_read.launch`)

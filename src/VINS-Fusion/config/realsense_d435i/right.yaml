@@ -4,13 +4,14 @@ model_type: PINHOLE
 camera_name: camera
 image_width: 640
 image_height: 480
+# Kalibr-measured (cam1 / infra2), 2026-06-01
 distortion_parameters:
-   k1: 0.0
-   k2: 0.0
-   p1: 0.0
-   p2: 0.0
+   k1: -0.005740
+   k2: 0.003108
+   p1: 0.001121
+   p2: 0.000643
 projection_parameters:
-   fx: 385.7544860839844
-   fy: 385.7544860839844
-   cx: 323.1204833984375
-   cy: 236.7432098388672
+   fx: 382.8855
+   fy: 383.2817
+   cx: 326.5054
+   cy: 242.0943

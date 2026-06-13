@@ -1,0 +1,320 @@
+Panels:
+  - Class: rviz/Displays
+    Help Height: 0
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /TF1
+        - /SVO Map Points1
+        - /SVO Pose1
+      Splitter Ratio: 0.5
+    Tree Height: 600
+  - Class: rviz/Views
+    Name: Views
+Preferences:
+  PromptSaveOnExit: false
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Alpha: 1
+      Class: rviz/Grid
+      Color: 160; 160; 164
+      Enabled: true
+      Line Style:
+        Line Width: 0.029999999329447746
+        Value: Lines
+      Name: Grid
+      Normal Cell Count: 0
+      Plane: XY
+      Plane Cell Count: 20
+      Reference Frame: <Fixed Frame>
+      Value: true
+
+    - Class: rviz/TF
+      Enabled: true
+      Frame Timeout: 15
+      Frames:
+        All Enabled: true
+      Marker Scale: 0.3
+      Name: TF
+      Show Arrows: true
+      Show Axes: true
+      Show Names: false
+      Update Interval: 0
+      Value: true
+
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: rgb
+      Class: rviz/PointCloud2
+      Color: 255; 255; 255
+      Color Transformer: RGB8
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 4096
+      Min Color: 0; 0; 0
+      Min Intensity: 0
+      Name: EGO Obstacle Cloud
+      Position Transformer: XYZ
+      Queue Size: 5
+      Selectable: true
+      Size (Pixels): 2
+      Size (m): 0.009999999776482582
+      Style: Flat Squares
+      Topic: /camera/depth/points
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /svo/points
+      Name: SVO Map Points
+      Namespaces:
+        {}
+      Queue Size: 100
+      Value: true
+
+    - Alpha: 1
+      Class: rviz/PoseWithCovariance
+      Color: 255; 25; 0
+      Covariance:
+        Orientation:
+          Alpha: 0.5
+          Color: 255; 255; 127
+          Color Style: Unique
+          Frame: Local
+          Offset: 1
+          Scale: 1
+          Value: false
+        Position:
+          Alpha: 0.30000001192092896
+          Color: 204; 51; 204
+          Scale: 1
+          Value: false
+        Value: false
+      Enabled: true
+      Head Length: 0.1
+      Head Radius: 0.05
+      Name: SVO Pose
+      Shaft Length: 0.2
+      Shaft Radius: 0.02
+      Shape: Arrow
+      Topic: /svo/pose_imu
+      Unreliable: false
+      Value: true
+
+    - Alpha: 1
+      Axes Length: 0.3
+      Axes Radius: 0.02
+      Class: rviz/Pose
+      Color: 0; 170; 0
+      Enabled: true
+      Head Length: 0.1
+      Head Radius: 0.05
+      Name: PX4 EKF Position
+      Shaft Length: 0.2
+      Shaft Radius: 0.02
+      Shape: Arrow
+      Topic: /mavros/local_position/pose
+      Unreliable: false
+      Value: true
+
+    - Alpha: 1
+      Axes Length: 0.2
+      Axes Radius: 0.01
+      Class: rviz/Pose
+      Color: 0; 0; 255
+      Enabled: true
+      Head Length: 0.07
+      Head Radius: 0.04
+      Name: Vision Pose to PX4
+      Shaft Length: 0.15
+      Shaft Radius: 0.015
+      Shape: Arrow
+      Topic: /mavros/vision_pose/pose
+      Unreliable: false
+      Value: true
+
+    - Class: rviz/Path
+      Color: 0; 220; 0
+      Enabled: true
+      Head Diameter: 0.05
+      Head Length: 0.05
+      Length: 0.3
+      Line Style: Lines
+      Line Width: 0.03
+      Name: EKF Path (PX4)
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Pose Style: None
+      Queue Size: 10
+      Radius: 0.03
+      Shaft Diameter: 0.02
+      Shaft Length: 0.1
+      Topic: /ekf_path
+      Unreliable: false
+      Value: true
+
+    - Class: rviz/Path
+      Color: 0; 120; 255
+      Enabled: true
+      Head Diameter: 0.05
+      Head Length: 0.05
+      Length: 0.3
+      Line Style: Lines
+      Line Width: 0.03
+      Name: Vision Path (relayed)
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Pose Style: None
+      Queue Size: 10
+      Radius: 0.03
+      Shaft Diameter: 0.02
+      Shaft Length: 0.1
+      Topic: /vio_path
+      Unreliable: false
+      Value: true
+
+    - Class: rviz/Path
+      Color: 255; 85; 0
+      Enabled: true
+      Head Diameter: 0.05
+      Head Length: 0.05
+      Length: 0.3
+      Line Style: Lines
+      Line Width: 0.04
+      Name: SVO Odom Path (raw)
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Pose Style: None
+      Queue Size: 10
+      Radius: 0.03
+      Shaft Diameter: 0.02
+      Shaft Length: 0.1
+      Topic: /svo_path
+      Unreliable: false
+      Value: true
+
+    - Angle Tolerance: 0.1
+      Class: rviz/Odometry
+      Covariance:
+        Orientation:
+          Alpha: 0.5
+          Color: 255; 255; 127
+          Color Style: Unique
+          Frame: Local
+          Offset: 1
+          Scale: 1
+          Value: false
+        Position:
+          Alpha: 0.3
+          Color: 204; 51; 204
+          Scale: 1
+          Value: false
+        Value: false
+      Enabled: true
+      Keep: 300
+      Name: MAVROS Fused Odom (EKF2)
+      Position Tolerance: 0.05
+      Shape:
+        Alpha: 1
+        Axes Length: 0.3
+        Axes Radius: 0.02
+        Color: 0; 255; 0
+        Head Length: 0.1
+        Head Radius: 0.05
+        Shaft Length: 0.2
+        Shaft Radius: 0.02
+        Value: Arrow
+      Topic: /mavros/local_position/odom
+      Unreliable: false
+      Value: true
+
+    - Class: rviz/Image
+      Enabled: true
+      Image Topic: /svo/image/0
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: SVO Tracked Features
+      Normalize Range: true
+      Queue Size: 5
+      Transport Hint: compressed
+      Unreliable: false
+      Value: true
+
+    - Class: rviz/Image
+      Enabled: true
+      Image Topic: /camera/color/image_raw
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: RGB Camera (YOLO)
+      Normalize Range: true
+      Queue Size: 5
+      Transport Hint: compressed
+      Unreliable: false
+      Value: true
+
+  Enabled: true
+  Fixed Frame: map
+  Global Options:
+    Background Color: 48; 48; 48
+    Default Light: true
+    Fixed Frame: map
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz/MoveCamera
+    - Class: rviz/Select
+    - Class: rviz/FocusCamera
+    - Class: rviz/Measure
+  Value: true
+  Views:
+    Current:
+      Class: rviz/Orbit
+      Distance: 5
+      Enable Stereo Rendering:
+        Stereo Eye Separation: 0.05999999865889549
+        Stereo Focal Distance: 1
+        Swap Stereo Eyes: false
+        Value: false
+      Focal Point:
+        X: 0
+        Y: 0
+        Z: 0
+      Focal Shape Fixed Size: true
+      Focal Shape Size: 0.05
+      Invert Z Axis: false
+      Name: Current View
+      Near Clip Distance: 0.009999999776482582
+      Pitch: 0.785398
+      Target Frame: <Fixed Frame>
+      Yaw: 0.785398
+    Saved: ~
+Window Geometry:
+  Displays:
+    collapsed: false
+  Height: 900
+  Hide Left Dock: false
+  Hide Right Dock: true
+  Views:
+    collapsed: false
+  Width: 1600
+  X: 0
+  Y: 0

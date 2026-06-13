@@ -7,6 +7,7 @@ catkin_package(CATKIN_DEPENDS rospy)
 
 catkin_install_python(PROGRAMS
   scripts/vio_bridge_node.py
+  scripts/svo_vision_relay_node.py
   scripts/gt_vision_bridge_node.py
   scripts/landmark_anchor_publisher_node.py
   scripts/odom_tf_broadcaster_node.py

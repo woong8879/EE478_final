@@ -1,0 +1,49 @@
+<?xml version="1.0"?>
+<!--
+  llm_agent.launch — the TASK-PLANNING layer (Assignment 4 Topic 2).
+  Brings up the LLM agentic stack ONLY; include it on top of a flying
+  drone (s1_takeoff) + EGO (ego_planner) so the actions reach the robot:
+
+      /mission_command ──► [llm_agent_core] ──/llm_action──► [agent_interface]
+                              ▲   │                                  │
+                  /semantic_map   /signboard_obs              /next_goal
+                              │   ▲                                  ▼
+                      [memory_llm_client  ⇄  OpenAI]          ego_bridge → EGO → PX4
+
+  Nodes:
+    * memory_llm_client (provided gpt_llm_client) — the llm_query service
+      with conversation memory. Needs OPENAI_API_KEY (setup_env.sh).
+    * llm_agent_core   — Reasoning Core: mission + semantic map + memory
+                         → high-level /llm_action.
+    * agent_interface  — grounds /llm_action into /next_goal + triggers.
+
+  Typical run (drone already flying via s1 + ego):
+    roslaunch ee478_bringup llm_agent.launch
+    rostopic pub -1 /mission_command std_msgs/String "data: 'Deliver to the pharmacy'"
+    # signboards: until YOLO recog lands, inject observations manually:
+    rostopic pub -1 /signboard_obs std_msgs/String "data: 'store_id=3 icon=PHARMACY arrow=LEFT'"
+-->
+<launch>
+  <arg name="use_llm" default="true"/>
+  <arg name="hover_z" default="0.5"/>
+  <arg name="store_coords"
+       default="$(find ee478_agent)/config/store_coords.yaml"/>
+
+  <!-- Provided LLM service with memory (OPENAI_API_KEY from env). -->
+  <node pkg="gpt_llm_client" type="memory_llm_client.py"
+        name="memory_llm_client" output="screen"/>
+
+  <!-- LLM Reasoning Core. Store coords loaded into its private ns. -->
+  <node pkg="ee478_agent" type="llm_agent_core_node.py"
+        name="llm_agent_core" output="screen">
+    <rosparam command="load" file="$(arg store_coords)"/>
+    <param name="use_llm" value="$(arg use_llm)"/>
+    <param name="hover_z" value="$(arg hover_z)"/>
+  </node>
+
+  <!-- Agent Interface: LLM actions -> /next_goal + signature/land triggers. -->
+  <node pkg="ee478_planner" type="agent_interface_node.py"
+        name="agent_interface" output="screen">
+    <param name="hover_z" value="$(arg hover_z)"/>
+  </node>
+</launch>

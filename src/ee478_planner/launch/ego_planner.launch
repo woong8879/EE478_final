@@ -20,14 +20,61 @@
 <launch>
   <arg name="drone_id"         default="0"/>
   <arg name="odom_topic"       default="/mavros/local_position/odom"/>
+
+  <!-- platform switches the depth source, intrinsics and depth-camera
+       frame between Gazebo (sim) and the real RealSense D435i (real).
+       pose_type=1 uses the DEPTH IMAGE + camera_pose, so only the depth
+       image topic, fx/fy/cx/cy and the optical frame need to change
+       (cloud_topic is unused in pose_type=1; k_depth_scaling_factor=1000
+       in advanced_param already matches the D435i 16UC1-mm depth). -->
+  <arg name="platform"         default="sim"/>   <!-- sim | real -->
+  <!-- real: RealSense rectified depth (16UC1 mm), aligned to the left IR;
+       sim: Gazebo depth image. -->
+  <arg name="depth_image_topic"
+       default="$(eval '/camera/depth/image_rect_raw' if arg('platform')=='real' else '/iris_depth_camera_vio/camera/depth/image_raw')"/>
+  <!-- depth optical frame the camera_pose must be expressed in. -->
+  <arg name="camera_frame"
+       default="$(eval 'camera_depth_optical_frame' if arg('platform')=='real' else 'camera_link')"/>
+  <!-- D435i depth intrinsics: the FACTORY depth-stream values read live
+       from /camera/depth/camera_info at 640x480 (depth uses its own
+       rectified intrinsics, slightly different from the IR Kalibr calib).
+       Verified 2026-06-02: K=[386.116,0,325.966; 0,386.116,240.178; ...]. -->
+  <arg name="cx" default="$(eval 325.9661 if arg('platform')=='real' else 423.5)"/>
+  <arg name="cy" default="$(eval 240.1778 if arg('platform')=='real' else 239.5)"/>
+  <arg name="fx" default="$(eval 386.1161 if arg('platform')=='real' else 454.68)"/>
+  <arg name="fy" default="$(eval 386.1161 if arg('platform')=='real' else 454.68)"/>
+
   <arg name="cloud_topic"      default="/iris_depth_camera_vio/camera/depth/points"/>
   <arg name="map_size_x"       default="60.0"/>
   <arg name="map_size_y"       default="20.0"/>
-  <arg name="map_size_z"       default="4.0"/>
+  <arg name="map_size_z"       default="2.5"/>
+  <!-- z update range around the drone: keep tight so the obstacle map covers
+       only the flight band and the floor/ceiling are NOT ingested. -->
+  <arg name="local_update_range_z" default="1.0"/>
   <arg name="max_vel"          default="0.6"/>
   <arg name="max_acc"          default="2.0"/>
   <arg name="max_jer"          default="10.0"/>
   <arg name="planning_horizon" default="3.0"/>
+  <!-- hover altitude: EGO z-lock target (must = s1 takeoff_alt). -->
+  <arg name="hover_z"          default="0.7"/>
+  <!-- z planning band: clamp EGO to a thin slab around the hover altitude so it
+       AVOIDS OBSTACLES HORIZONTALLY (goes through the gap), never over/under.
+       s4 passes hover_z +/- 0.2. Widen if EGO fails to find a path. -->
+  <arg name="virtual_ceil"   default="1.3"/>
+  <arg name="virtual_ground" default="-1.0"/>
+  <!-- obstacle inflation (m) = drone RADIUS + small margin. The inflated map
+       shows where the drone CENTRE may go, so it is intentionally smaller than
+       the physical free space by this amount. MUST be >= the drone's prop
+       radius or the props clip obstacles. 0.30 assumed a ~0.6 m drone; lower it
+       to match a smaller drone for more flyable space. -->
+  <arg name="obstacles_inflation" default="0.10"/>
+  <!-- depth rate fed to EGO grid_map (Hz). 15 halves CPU vs the 30 Hz stream. -->
+  <arg name="depth_throttle_hz" default="15.0"/>
+  <!-- floor clip height (m, world z): points below = ground, not obstacle.
+       -1.0 = NO clip: with correct projection the floor sits at z~0 and the
+       drone flies above it (inflation never reaches hover_z), so no hack is
+       needed. The ground-level flooding is only a ground-TEST artifact. -->
+  <arg name="ground_height" default="-1.0"/>
 
   <!-- All planner / grid_map / optimisation params come from upstream. -->
   <include file="$(find ego_planner)/launch/include/advanced_param.xml">
@@ -35,14 +82,15 @@
     <arg name="map_size_x_"       value="$(arg map_size_x)"/>
     <arg name="map_size_y_"       value="$(arg map_size_y)"/>
     <arg name="map_size_z_"       value="$(arg map_size_z)"/>
+    <arg name="local_update_range_z_" value="$(arg local_update_range_z)"/>
     <arg name="odometry_topic"    value="mavros/local_position/odom"/>
     <arg name="camera_pose_topic" value="pcl_render_node/camera_pose"/>
     <arg name="depth_topic"       value="pcl_render_node/depth"/>
     <arg name="cloud_topic"       value="iris_depth_camera/camera/depth/points"/>
-    <arg name="cx" value="423.5"/>
-    <arg name="cy" value="239.5"/>
-    <arg name="fx" value="454.68"/>
-    <arg name="fy" value="454.68"/>
+    <arg name="cx" value="$(arg cx)"/>
+    <arg name="cy" value="$(arg cy)"/>
+    <arg name="fx" value="$(arg fx)"/>
+    <arg name="fy" value="$(arg fy)"/>
     <arg name="max_vel"           value="$(arg max_vel)"/>
     <arg name="max_acc"           value="$(arg max_acc)"/>
     <arg name="max_jer"           value="$(arg max_jer)"/>
@@ -64,12 +112,21 @@
        path drops 75 percent of frames due to do_transform_cloud being
        slow). -->
   <node pkg="topic_tools" type="relay" name="relay_drone_$(arg drone_id)_odom"
-        args="$(arg odom_topic) /drone_$(arg drone_id)_mavros/local_position/odom"/>
-  <node pkg="topic_tools" type="relay" name="relay_drone_$(arg drone_id)_depth"
-        args="/iris_depth_camera_vio/camera/depth/image_raw /drone_$(arg drone_id)_pcl_render_node/depth"/>
+        args="$(arg odom_topic) /drone_$(arg drone_id)_mavros/local_position/odom"
+        launch-prefix="taskset -c 2-5"/>
+  <!-- THROTTLE depth to EGO (not full relay): grid_map at 15 Hz is plenty for
+       0.4 m/s and halves the heaviest CPU consumer, leaving headroom for
+       perception. depth_throttle_hz tunable. -->
+  <node pkg="topic_tools" type="throttle" name="relay_drone_$(arg drone_id)_depth"
+        args="messages $(arg depth_image_topic) $(arg depth_throttle_hz) /drone_$(arg drone_id)_pcl_render_node/depth"
+        launch-prefix="taskset -c 2-5"/>
   <node pkg="ee478_localization" type="camera_pose_publisher_node.py"
-        name="camera_pose_publisher_drone_$(arg drone_id)" output="screen">
-    <param name="out_topic" value="/drone_$(arg drone_id)_pcl_render_node/camera_pose"/>
+        name="camera_pose_publisher_drone_$(arg drone_id)" output="screen"
+        launch-prefix="taskset -c 2-5">
+    <param name="out_topic"    value="/drone_$(arg drone_id)_pcl_render_node/camera_pose"/>
+    <!-- Pose of the DEPTH optical frame (real: camera_depth_optical_frame)
+         so EGO's depth projection lands in the right place. -->
+    <param name="camera_frame" value="$(arg camera_frame)"/>
   </node>
 
   <!-- Override a few grid_map params that the upstream defaults make
@@ -90,28 +147,42 @@
        synchronization issue compared to the cloud path. -->
   <param name="drone_$(arg drone_id)_ego_planner_node/grid_map/pose_type"
          value="1"/>
-  <!-- Aggressive min_ray_length: ignore everything within 1 m of
-       the camera so the drone's own body / prop wash / floor right
-       under the drone are NEVER ingested as obstacles. This is what
-       was causing EGO's "drone is in obstacle" error. -->
+  <!-- min_ray_length 0.1: the camera sits at the FRONT of the drone and looks
+       FORWARD + ~12.8 deg UP, so the near field (0.1-1 m ahead) is clear of the
+       drone's own body and of the floor under it (nothing of the drone is in
+       front of the lens). So we can drop the old conservative 1.0 m blind zone
+       and detect obstacles as close as 0.1 m. (If props/body appear at the FOV
+       edges or false near-obstacles show up -> raise this back.) -->
   <param name="drone_$(arg drone_id)_ego_planner_node/grid_map/min_ray_length"
-         value="1.0"/>
+         value="0.1"/>
+  <!-- match the depth filter's near cutoff so 0.1 m is actually the limit
+       (else depth_filter_mindist=0.2 from advanced_param would dominate). -->
+  <param name="drone_$(arg drone_id)_ego_planner_node/grid_map/depth_filter_mindist"
+         value="0.1"/>
+  <!-- Inflate obstacles by ~the drone radius (props ~0.25 m) + margin, else
+       EGO routes the path CENTER too close and the props clip the obstacle
+       ("박아버림"). 0.10 was only safe because min_ray_length=1.0 already keeps
+       the start cell clear, so we can afford real clearance here. -->
   <param name="drone_$(arg drone_id)_ego_planner_node/grid_map/obstacles_inflation"
-         value="0.10"/>
+         value="$(arg obstacles_inflation)"/>
   <param name="drone_$(arg drone_id)_ego_planner_node/grid_map/virtual_ground"
-         value="-1.0"/>
+         value="$(arg virtual_ground)"/>
   <!-- Tight virtual ceiling: EGO cannot route above this z. With
        drone target hover at z=0.7 and a gate aperture roughly 1.5 m
        tall, ceiling 1.3 m forces EGO to plan THROUGH the gate
        rather than OVER its top bar (which sits ~1.5-2 m). -->
   <param name="drone_$(arg drone_id)_ego_planner_node/grid_map/virtual_ceil"
-         value="1.3"/>
+         value="$(arg virtual_ceil)"/>
+  <!-- Clip the FLOOR: points below this world-z are treated as ground, not
+       obstacles. The up-tilted camera's wide vertical FOV still catches the
+       floor (worst at ground level), flooding the front of the map. 0.15 m
+       removes the floor while keeping real obstacles (chair seat ~0.5 m). -->
   <param name="drone_$(arg drone_id)_ego_planner_node/grid_map/ground_height"
-         value="-1.0"/>
+         value="$(arg ground_height)"/>
 
   <!-- traj_server: trajectory polynomial -> high-rate PositionCommand. -->
   <node pkg="ego_planner" name="drone_$(arg drone_id)_traj_server"
-        type="traj_server" output="screen">
+        type="traj_server" output="screen" launch-prefix="taskset -c 2-5">
     <remap from="position_cmd"        to="/drone_$(arg drone_id)_planning/pos_cmd"/>
     <remap from="~planning/trajectory" to="/drone_$(arg drone_id)_planning/trajectory"/>
     <remap from="heartbeat"            to="/drone_$(arg drone_id)_traj_server/heartbeat"/>
@@ -126,8 +197,13 @@
     <param name="goal_out_topic"   value="/goal_with_id"/>
     <param name="cmd_in_topic"     value="/drone_$(arg drone_id)_planning/pos_cmd"/>
     <param name="cmd_out_topic"    value="/offboard/cmd_raw"/>
-    <param name="arrival_radius_m" value="0.6"/>
+    <param name="arrival_radius_m" value="0.5"/>
     <param name="tick_hz"          value="20.0"/>
     <param name="resend_period_s"  value="1.0"/>
+    <!-- z-lock altitude: EGO's z is forced to hover_z. MUST match s1's
+         takeoff_alt or EGO yanks the drone off its takeoff height. -->
+    <param name="hover_z"          value="$(arg hover_z)"/>
+    <param name="z_min"            value="$(eval arg('hover_z') - 0.4)"/>
+    <param name="z_max"            value="$(eval arg('hover_z') + 0.4)"/>
   </node>
 </launch>

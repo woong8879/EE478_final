@@ -1,0 +1,6 @@
+target_type: 'aprilgrid'   # gridtype
+tagCols: 6                 # number of apriltags (columns)
+tagRows: 6                 # number of apriltags (rows)
+# ↓↓↓ MUST match your PRINTED grid. Measure one black tag's side in metres.
+tagSize: 0.088            # size of one apriltag, m  (e.g. A4 6x6 -> ~0.022; A0 -> ~0.088)
+tagSpacing: 0.3           # gap between tags = tagSpacing * tagSize (Kalibr default 0.3)

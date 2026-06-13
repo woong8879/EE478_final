@@ -26,7 +26,7 @@
     rostopic echo /quiz/chosen_pose     # expect y near 1.8
 -->
 <launch>
-  <arg name="platform"        default="sim"/>
+  <arg name="platform"        default="real"/>
   <arg name="vio_source"      default="gt"/>
   <arg name="hover_z"
        default="$(eval 0.5 if arg('platform') == 'real' else 0.7)"/>
@@ -35,7 +35,7 @@
   <arg name="gate_center_label" default="7"/>
   <arg name="gate_right_label"  default="9"/>
   <arg name="fcu_url"
-       default="serial:///dev/ttyTHS1:921600"/>
+       default="serial:///dev/ttyTHS0:921600"/>
 
   <include file="$(find ee478_bringup)/launch/subtasks/s1_takeoff.launch">
     <arg name="platform"   value="$(arg platform)"/>

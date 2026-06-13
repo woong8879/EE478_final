@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<!--
+  AprilTag world-anchor for VIO drift correction.
+
+  Detects the course AprilTags in the IR image, looks up each tag's known world
+  position (config/apriltag_anchors.yaml), back-computes the drone's true pose,
+  and publishes /landmark_anchor_pose -> vio_bridge_node blends it smoothly into
+  /mavros/vision_pose/pose (no teleport). Run alongside the VIO + vio_bridge.
+
+  Standalone:
+    roslaunch ee478_localization apriltag_anchor.launch
+-->
+<launch>
+  <arg name="image_topic"       default="/camera/infra1/image_rect_raw"/>
+  <arg name="camera_info_topic" default="/camera/infra1/camera_info"/>
+  <arg name="drone_pose_topic"  default="/mavros/local_position/pose"/>
+  <!-- true = only emit anchor corrections while ARMED (flight-safe). Set false
+       ONLY for a static bench accuracy check (drone at a known spot, full TF +
+       mavros up): then drone_true should match the real position. -->
+  <arg name="require_armed"     default="true"/>
+  <!-- false = DETECTION-ONLY: publish /apriltag/detections (ids + ranges, for
+       the delivery-camera trigger) but never an EKF-touching anchor pose. -->
+  <arg name="emit_anchor"       default="true"/>
+
+  <node pkg="ee478_localization" type="apriltag_anchor_node.py"
+        name="apriltag_anchor" output="screen" launch-prefix="taskset -c 2-5">
+    <!-- tag_family, tag_size_m, tags{} -->
+    <rosparam command="load"
+              file="$(find ee478_localization)/config/apriltag_anchors.yaml"/>
+    <param name="image_topic"       value="$(arg image_topic)"/>
+    <param name="camera_info_topic" value="$(arg camera_info_topic)"/>
+    <param name="drone_pose_topic"  value="$(arg drone_pose_topic)"/>
+    <param name="require_armed"     value="$(arg require_armed)"/>
+    <param name="emit_anchor"       value="$(arg emit_anchor)"/>
+  </node>
+</launch>

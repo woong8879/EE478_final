@@ -1,0 +1,60 @@
+<?xml version="1.0"?>
+<!--
+  BENCH CHECK: both cameras' RGB + YOLOv11 on each, NO trigger/armed gating.
+  Carry the drone by hand and point it at the boxes.
+
+    roslaunch ee478_bringup yolo_check.launch
+
+  Opens two rqt_image_view windows (front + down, annotated). Detections are
+  logged by the yolo nodes:  [yolo_delivery] [('cafe', 0.91)] ...
+  Topics: /delivery/yolo_front/{detections,image}  (forward cam)
+          /delivery/yolo/{detections,image}        (down cam)
+
+  RGB-only on BOTH cameras (no IR/depth/IMU) -> light, no VIO needed.
+-->
+<launch>
+  <arg name="front_serial" default="238722070618"/>
+  <arg name="down_serial"  default="034422072213"/>
+  <arg name="engine"       default="/home/team5/EE478_final/best.engine"/>
+
+  <!-- forward camera, COLOR only -->
+  <include file="$(find realsense2_camera)/launch/rs_camera.launch">
+    <arg name="camera"        value="camera"/>
+    <arg name="serial_no"     value="$(arg front_serial)"/>
+    <arg name="initial_reset" value="false"/>
+    <arg name="enable_color"  value="true"/>
+    <arg name="color_width"   value="424"/>
+    <arg name="color_height"  value="240"/>
+    <arg name="color_fps"     value="15"/>
+    <arg name="enable_depth"  value="false"/>
+    <arg name="enable_infra1" value="false"/>
+    <arg name="enable_infra2" value="false"/>
+    <arg name="enable_gyro"   value="false"/>
+    <arg name="enable_accel"  value="false"/>
+    <arg name="publish_tf"    value="false"/>
+  </include>
+
+  <!-- downward camera, COLOR only -->
+  <include file="$(find ee478_bringup)/launch/down_camera.launch">
+    <arg name="serial_no" value="$(arg down_serial)"/>
+  </include>
+
+  <!-- YOLO directly on the RAW color topics (no trigger relay on the bench) -->
+  <node pkg="ee478_bringup" type="yolo_delivery_node.py"
+        name="yolo_front" output="screen">
+    <param name="engine"      value="$(arg engine)"/>
+    <param name="image_topic" value="/camera/color/image_raw"/>
+    <param name="out_ns"      value="/delivery/yolo_front"/>
+  </node>
+  <node pkg="ee478_bringup" type="yolo_delivery_node.py"
+        name="yolo_down" output="screen">
+    <param name="engine"      value="$(arg engine)"/>
+    <param name="image_topic" value="/down_camera/color/image_raw"/>
+    <param name="out_ns"      value="/delivery/yolo"/>
+  </node>
+
+  <!-- No rqt here (it lagged the Jetson badly). View the annotated streams
+       from the GROUND laptop instead (ROS_MASTER_URI pointed at the drone):
+         rqt_image_view /delivery/yolo_front/image
+         rqt_image_view /delivery/yolo/image -->
+</launch>

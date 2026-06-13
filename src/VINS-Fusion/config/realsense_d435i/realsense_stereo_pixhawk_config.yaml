@@ -1,0 +1,76 @@
+%YAML:1.0
+
+#common parameters
+#support: 1 imu 1 cam; 1 imu 2 cam: 2 cam; 
+imu: 1         
+num_of_cam: 2  
+
+imu_topic: "/mavros/imu/data_raw"   # Pixhawk IMU (FLU body), ~173 Hz, low-vibration
+image0_topic: "/camera/infra1/image_rect_raw"
+image1_topic: "/camera/infra2/image_rect_raw"
+output_path: "/tmp/vins_output/"
+
+cam0_calib: "left.yaml"
+cam1_calib: "right.yaml"
+image_width: 640
+image_height: 480
+   
+
+# Extrinsic IMU(Pixhawk)->Camera = inv(Kalibr T_cam_imu). MEASURED by
+# kalibr_calibrate_imu_camera (cam_imu.bag, 2026-06-01), NOT hand-guessed.
+# body_T_cam = T_imu_cam: camera optical centre is ~0.154 m fwd, 0.039 m up
+# of the Pixhawk IMU, optical axis tilted ~12.78 deg up. Residuals were
+# reproj 0.42 px / gyro 0.0054 rad/s / accel 0.069 m/s^2 (good sync).
+# estimate_extrinsic:0 = trust it (flight is gentle -> not enough motion to
+# safely re-estimate 6-DoF extrinsic online; the Kalibr value is accurate).
+estimate_extrinsic: 0   # 0 trust as-is; 1 optimise around this initial guess
+
+body_T_cam0: !!opencv-matrix
+   rows: 4
+   cols: 4
+   dt: d
+   data: [ -0.01542992,  0.22135450,  0.97507133,  0.15366479,
+           -0.99982026,  0.00732886, -0.01748530,  0.01527054,
+           -0.01101661, -0.97516587,  0.22120163,  0.03915979,
+            0.0,         0.0,         0.0,         1.0 ]
+
+body_T_cam1: !!opencv-matrix
+   rows: 4
+   cols: 4
+   dt: d
+   data: [ -0.01681484,  0.22098369,  0.97513254,  0.15284397,
+           -0.99979620,  0.00718124, -0.01886753, -0.03492431,
+           -0.01117208, -0.97525106,  0.22081791,  0.03851086,
+           0.0, 0.0, 0.0,  1.0 ]
+
+#Multiple thread support
+multiple_thread: 1
+
+#feature traker paprameters
+max_cnt: 150            # max feature number in feature tracking
+min_dist: 30            # min distance between two features 
+freq: 10                # frequence (Hz) of publish tracking result. At least 10Hz for good estimation. If set 0, the frequence will be same as raw image 
+F_threshold: 1.0        # ransac threshold (pixel)
+show_track: 0           # publish tracking image as topic
+flow_back: 1            # perform forward and backward optical flow to improve feature tracking accuracy
+
+#optimization parameters
+max_solver_time: 0.04  # max solver itration time (ms), to guarantee real time
+max_num_iterations: 8   # max solver itrations, to guarantee real time
+keyframe_parallax: 10.0 # keyframe selection threshold (pixel)
+
+#imu parameters       The more accurate parameters you provide, the better performance
+acc_n: 0.1          # accelerometer measurement noise standard deviation. #0.2   0.04
+gyr_n: 0.01         # gyroscope measurement noise standard deviation.     #0.05  0.004
+acc_w: 0.001         # accelerometer bias random work noise standard deviation.  #0.002
+gyr_w: 0.0001       # gyroscope bias random work noise standard deviation.     #4.0e-5
+g_norm: 9.805         # gravity magnitude
+
+#unsynchronization parameters
+estimate_td: 1                      # online estimate time offset between camera and imu
+td: 0.004709                         # Kalibr timeshift_cam_imu (t_imu = t_cam + td); estimate_td:1 refines it online
+
+#loop closure parameters
+load_previous_pose_graph: 0        # load and reuse previous pose graph; load from 'pose_graph_save_path'
+pose_graph_save_path: "/tmp/vins_output/pose_graph/" # save and load path
+save_image: 0                   # save image in pose graph for visualization prupose; you can close this function by setting 0 

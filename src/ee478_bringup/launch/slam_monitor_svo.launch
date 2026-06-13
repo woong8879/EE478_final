@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<!--
+  OPTIONAL convenience launch: RViz monitor for the SVO Pro (stereo VO) path.
+  Use this ONLY on a ground machine that HAS this package built. It just opens
+  RViz with the svo_monitor config.
+
+  You usually do NOT need this:
+    * The drone bringup (drone_bringup.launch, included by slam_assist_vins
+      and the s1..s8 subtasks) already runs pose_to_path, so /ekf_path,
+      /vio_path and /svo_path are published by the Jetson.
+    * A ground laptop without the package just copies the .rviz file and runs
+      `rviz -d svo_monitor.rviz` directly — no launch needed.
+
+  If you do run it (package present on the ground machine):
+    export ROS_MASTER_URI=http://10.249.25.56:11311   # the Jetson's IP
+    export ROS_IP=<this laptop's IP on the same subnet>
+    roslaunch ee478_bringup slam_monitor_svo.launch
+
+  Needs the laptop and Jetson on the SAME, non-AP-isolated network (campus
+  WiFi often isolates clients -> use a phone hotspot or a shared router).
+-->
+<launch>
+  <node pkg="rviz" type="rviz" name="slam_monitor_svo"
+        args="-d $(find ee478_bringup)/rviz/svo_monitor.rviz"
+        output="screen"/>
+</launch>

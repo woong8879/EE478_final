@@ -1,0 +1,36 @@
+# AprilTag positions in the MAP frame (origin = takeoff point).
+#
+# Frame = ROS FLU, SAME as the VIO/map frame: +x = drone's forward at takeoff,
+# +y = drone's LEFT, +z = up. NO axis flip anywhere (an earlier version assumed
+# +y=right and y-flipped on load -- wrong; these are direct map coords).
+#
+# Gate pairs (x=3.5 wall): LEFT gate centre (3.5, 1.0) flanked by 281 (its left
+# top corner, y=1.7) + 282 (right corner, y=0.3); RIGHT gate centre (3.5,-1.0)
+# flanked by 283 (y=-0.3) + 284 (y=-1.7).
+#
+# Used for DETECTION-ONLY missions now (gate verification / passage check /
+# delivery trigger); the EKF anchor path is disabled by default.
+
+tag_family: tag36h11        # IDs fit tag36h11
+tag_size_m: 0.15            # EFFECTIVE detection size, NOT the ruler size.
+                            # Ruler black-edge = 16 cm, but cv2.aruco's AprilTag
+                            # corners land ~1 cm inside -> effective ~15 cm.
+                            # EMPIRICALLY 0.15 makes a known 3.5 m tag read as
+                            # 3.5 m. Tune by measured-vs-true distance at a
+                            # known spot, not by the ruler.
+
+# tag_id: [x, y, z]  (metres, map FLU). IDs are QUOTED (string keys) -- a
+# rosparam dict can't have integer keys; the node int()s them back.
+tags:
+  "281": [3.50,   1.7, 1.45]
+  "282": [3.50,   0.3, 1.45]
+  "283": [3.50,  -0.3, 1.45]
+  "284": [3.50,  -1.7, 1.45]
+  "266": [8.2,    3.50, 1.45]
+  "267": [9.6,    3.50, 1.45]
+  "268": [10.2,   3.50, 1.45]
+  "269": [11.6,   3.50, 1.45]
+  "271": [3.50,   5.5, 1.45]
+  "274": [3.50,   6.9, 1.45]
+  "275": [3.50,   7.5, 1.45]
+  "276": [3.50,   8.9, 1.45]

@@ -4,7 +4,7 @@
 
   Assumes:
     * The Pixhawk is wired to the Jetson over UART (default
-      /dev/ttyTHS1 @ 921600). Use `fcu_url` to override
+      /dev/ttyTHS0 (UART, Holybro Kakute H7)). Use `fcu_url` to override
       (e.g. `serial:///dev/ttyUSB0:921600`, or a UDP URL if you are
       bench-testing via a sim-bridge).
     * The static base_link -> camera_link TF is published by the
@@ -18,7 +18,7 @@
       verifying RC failsafe + battery.
 -->
 <launch>
-  <arg name="fcu_url"      default="serial:///dev/ttyTHS1:921600"/>
+  <arg name="fcu_url"      default="serial:///dev/ttyTHS0:921600"/>
   <arg name="gcs_url"      default=""/>
   <arg name="tgt_system"   default="1"/>
   <arg name="tgt_component" default="1"/>
@@ -26,7 +26,7 @@
   <!-- MAVROS -->
   <include file="$(find mavros)/launch/node.launch">
     <arg name="pluginlists_yaml"
-         value="$(find mavros)/launch/px4_pluginlists.yaml"/>
+         value="$(find ee478_bringup)/config/px4_pluginlists.yaml"/>
     <arg name="config_yaml"
          value="$(find mavros)/launch/px4_config.yaml"/>
     <arg name="fcu_url"        value="$(arg fcu_url)"/>
@@ -36,12 +36,20 @@
     <arg name="log_output"     value="screen"/>
   </include>
 
-  <!-- Static base_link -> camera_link. Measured at mount install.
-       Override at launch:
-         roslaunch ... base_to_cam_tf:="0.10 0 0.05 0 0 0"
+  <!-- Static base_link -> camera_link (x y z yaw pitch roll, radians).
+       IDENTITY rotation for a forward-facing, level camera: camera_link
+       is a ROS body frame (x-fwd, y-left, z-up), same as base_link. The
+       optical-frame rotation (camera_link -> *_optical_frame, ~-90/-90)
+       is published by the RealSense driver itself — do NOT add it here
+       or it double-rotates and breaks IMU gravity / VINS init.
+       Translation = camera position relative to base_link (FLU, metres).
+       pitch (about y-left): negative = camera tilts UP, positive = down.
+       This drone's camera is mounted 15 deg ABOVE horizontal
+       => pitch = -0.2618 rad.
+       Override at launch: base_to_cam_tf:="0.10 0 0.05 0 -0.2618 0"
   -->
   <arg name="base_to_cam_tf"
-       default="0.10 0 0.05 -1.5707963 0 -1.5707963"/>
+       default="0.154 0.015 0.039 0 -0.2231 0"/>   <!-- Kalibr: 12.78deg up, ~0.154 fwd -->
   <node pkg="tf2_ros" type="static_transform_publisher"
         name="base_to_camera_link"
         args="$(arg base_to_cam_tf) base_link camera_link"/>

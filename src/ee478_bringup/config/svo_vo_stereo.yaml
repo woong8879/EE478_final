@@ -1,0 +1,94 @@
+# SVO Pro — pure STEREO VISUAL ODOMETRY (no IMU, no ceres backend).
+# Derived from svo_ros/param/pinhole.yaml but switched to stereo and with the
+# IMU/backend fully disabled, per the decision to run SVO as plain VO (the
+# Pixhawk IMU is fused later by PX4 EKF2, not inside SVO).
+#
+# Why this works without IMU and without motion:
+#   * Stereo gives METRIC scale from the baseline, so the map initializes from
+#     the very first stereo pair — no init wiggle needed (unlike mono/VIO).
+#   * T_world_body (published on /svo/pose_imu) is still well-defined: "body"
+#     is the frame from the calib's T_B_C; we just never read IMU data.
+#
+# Tuned for the D435i IR pair at 640x480 (EuRoC defaults are 752x480 — close,
+# so the pyramid/grid settings carry over).
+
+############################
+##### Basic parameters #####
+############################
+
+# Stereo pipeline (the whole point — metric VO from the IR baseline).
+pipeline_is_stereo: True
+
+max_fts: 180
+max_n_kfs: 30
+map_scale: 1.0   # ignored for stereo (scale comes from the baseline)
+
+T_world_imuinit/qx: 0
+T_world_imuinit/qy: 0
+T_world_imuinit/qz: 0
+T_world_imuinit/qw: 1
+
+# Keyframe selection
+kfselect_criterion: FORWARD
+kfselect_numkfs_upper_thresh: 120
+kfselect_numkfs_lower_thresh: 70
+kfselect_min_dist_metric: 0.1
+kfselect_min_angle: 20
+kfselect_min_disparity: 40
+update_seeds_with_old_keyframes: True
+
+# Affine illumination compensation (cheap subset on; IR exposure is stable)
+img_align_est_illumination_gain: false
+img_align_est_illumination_offset: false
+depth_filter_affine_est_offset: true
+depth_filter_affine_est_gain: false
+reprojector_affine_est_offset: true
+reprojector_affine_est_gain: false
+
+########################################
+###### Tuning for each module ##########
+########################################
+# Initialization (used by the stereo triangulation seed)
+init_min_disparity: 30
+
+# Feature Detection (640x480 ~ EuRoC 752x480)
+grid_size: 30
+n_pyr_levels: 3
+detector_threshold_primary: 10
+detector_threshold_secondary: 200
+
+# Image Alignment
+img_align_max_level: 4
+img_align_min_level: 2
+
+# Reprojection — async ON for stereo (two cams, multithreaded)
+use_async_reprojectors: True
+reprojector_max_n_kfs: 5
+scan_epi_unit_sphere: False
+
+# Pose Optimization
+poseoptim_thresh: 2.0
+poseoptim_using_unit_sphere: False
+
+# Depth Filter
+seed_convergence_sigma2_thresh: 200
+
+# IMU — OFF. All gyro/velocity priors zeroed (no IMU to provide them).
+use_imu: False
+poseoptim_prior_lambda: 0.0
+img_align_prior_lambda_rot: 0.0
+img_align_prior_lambda_trans: 0.0
+
+# Dense input (for the obstacle/dense viz; nth-frame throttle)
+publish_every_nth_dense_input: 5
+
+# Visualization
+publish_marker_scale: 0.5
+
+# Stereo depth priors (inverse-depth range for the seeds)
+max_depth_inv: 0.05
+min_depth_inv: 1.0
+mean_depth_inv: 0.3
+
+# Ceres backend OFF — this is frontend-only VO.
+use_ceres_backend: false

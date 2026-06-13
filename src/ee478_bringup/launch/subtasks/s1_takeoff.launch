@@ -11,25 +11,40 @@
   Sim test:
     roslaunch ee478_bringup s1_takeoff.launch platform:=sim
 
-  Real-drone test (operator arms manually via QGC; this stack just
-  publishes setpoints so PX4 can flip into OFFBOARD when armed):
+  Real-drone test (operator flips OFFBOARD; the code arms on detection):
     roslaunch ee478_bringup s1_takeoff.launch \
-        platform:=real fcu_url:=serial:///dev/ttyTHS1:921600
-    # in QGC: ARM, then switch flight mode to OFFBOARD.
-    # The drone will ascend to takeoff_alt and hover.
+        platform:=real fcu_url:=serial:///dev/ttyTHS0:921600
+    # The operator switches the flight mode to OFFBOARD (RC mode switch).
+    # The code NEVER commands OFFBOARD on real. But the instant OFFBOARD
+    # is detected, offboard_controller ARMS AUTOMATICALLY and the drone
+    # ascends to takeoff_alt and hovers.
+    # => Flipping to OFFBOARD = immediate arm + ascent. Clear the props
+    #    and area BEFORE flipping OFFBOARD.
 
   SAFETY (real drone):
-    * auto_arm is FORCED FALSE on platform:=real. Operator arms.
-    * takeoff_alt defaults to 0.5 m on real, 0.7 on sim.
+    * Code never sets OFFBOARD on real (auto_arm FORCED FALSE => no auto
+      mode switch). But arm-on-OFFBOARD-detect IS active: OFFBOARD => arm.
+    * Pre-flight: FC must be at STANDBY (not UNINIT/TERMINATION), and SVO
+      must be tracking with a valid /mavros/local_position before you flip
+      OFFBOARD, or PX4 rejects the OFFBOARD switch / arming.
+    * takeoff_alt (hover_z) defaults to 1.0 m on real, 0.7 on sim
+      (override e.g. hover_z:=1.5).
     * Always verify RC failsafe, battery, and clear test area first.
 -->
 <launch>
-  <arg name="platform"   default="sim"/>
+  <arg name="platform"   default="real"/>
   <arg name="vio_source" default="gt"/>
-  <arg name="hover_z"    default="$(eval 0.5 if arg('platform') == 'real' else 0.7)"/>
+  <arg name="hover_z"    default="$(eval 0.7 if arg('platform') == 'real' else 0.7)"/>
   <arg name="auto_arm"   default="$(eval arg('platform') == 'sim')"/>
+  <!-- Real FCU is the Holybro Kakute H7 over UART (/dev/ttyTHS0),
+       NOT a UART. Override if it enumerates elsewhere
+       (ls /dev/serial/by-id). -->
   <arg name="fcu_url"
-       default="serial:///dev/ttyTHS1:921600"/>
+       default="serial:///dev/ttyTHS0:921600"/>
+  <!-- real VO backend: svo (default) | vins  (see drone_bringup.launch) -->
+  <arg name="estimator" default="svo"/>
+  <!-- real VINS source (only if estimator:=vins): vio | vo | vio_px4 -->
+  <arg name="vins_mode" default="vio"/>
 
   <!-- ============ SIM ============ -->
   <group if="$(eval platform == 'sim')">
@@ -43,43 +58,81 @@
         <param name="rate_hz"      value="30.0"/>
       </node>
     </group>
-    <group if="$(eval vio_source == 'rtabmap')">
-      <include file="$(find ee478_localization)/launch/rtabmap_sim.launch"/>
-      <node pkg="ee478_localization" type="vio_bridge_node.py"
-            name="vio_bridge" output="screen">
-        <param name="vo_topic"          value="/rtabmap/odom"/>
-        <param name="vision_pose_topic" value="/mavros/vision_pose/pose"/>
-        <param name="bootstrap_enabled" value="false"/>
-        <param name="max_jump_m"        value="0.5"/>
-      </node>
-    </group>
   </group>
 
   <!-- ============ REAL ============ -->
+  <!-- Full drone base stack from the single source of truth. vio_source is a
+       sim-only knob; on real the VO backend is `estimator` (svo by default,
+       or vins). vins_mode applies only when estimator:=vins. -->
   <group if="$(eval platform == 'real')">
-    <include file="$(find ee478_bringup)/launch/px4_real.launch">
-      <arg name="fcu_url" value="$(arg fcu_url)"/>
+    <include file="$(find ee478_bringup)/launch/drone_bringup.launch">
+      <arg name="fcu_url"   value="$(arg fcu_url)"/>
+      <arg name="estimator" value="$(arg estimator)"/>
+      <arg name="vins_mode" value="$(arg vins_mode)"/>
     </include>
-    <!-- Real drone always uses RTAB-Map; GT does not exist there. -->
-    <include file="$(find ee478_localization)/launch/rtabmap_sim.launch"/>
-    <node pkg="ee478_localization" type="vio_bridge_node.py"
-          name="vio_bridge" output="screen">
-      <param name="vo_topic"          value="/rtabmap/odom"/>
-      <param name="vision_pose_topic" value="/mavros/vision_pose/pose"/>
-      <param name="bootstrap_enabled" value="false"/>
-      <param name="max_jump_m"        value="0.5"/>
-    </node>
   </group>
 
   <!-- ============ OFFBOARD CONTROLLER (both platforms) ============ -->
   <node pkg="ee478_planner" type="offboard_controller.py"
-        name="offboard_controller" output="screen">
+        name="offboard_controller" output="screen"
+        launch-prefix="taskset -c 2-5">
     <remap from="~goal"    to="/offboard/goal"/>
     <remap from="~cmd_raw" to="/offboard/cmd_raw"/>
     <param name="takeoff_alt"    value="$(arg hover_z)"/>
     <param name="auto_arm"       value="$(arg auto_arm)"/>
     <param name="settle_s"       value="10.0"/>
     <param name="max_step_vel"   value="0.6"/>
-    <param name="max_step_vel_z" value="0.3"/>
+    <!-- z hold recovery velocity cap. 0.15 throttled the PID so it couldn't
+         out-climb a sag -> drone sank. 0.5 = full use of MPC_Z_VEL_MAX_UP. -->
+    <param name="max_step_vel_z" value="0.5"/>
+    <!-- gentle takeoff: ramp z up at this rate (m/s) so the climb doesn't
+         outrun the VIO/EKF right after takeoff. SLOW on purpose. -->
+    <!-- Slowing the climb made takeoff WORSE: the drone lingers longer in the
+         motor-vibration regime and accumulates more SVO feature loss. Climb at
+         a moderate rate to clear the vulnerable phase quickly; the real fix for
+         the loss is shorter IR exposure (see realsense_d435i_vins.launch). -->
+    <!-- PURE VELOCITY takeoff: this is the commanded climb VELOCITY (m/s), and
+         with pure velocity control it must be high enough that the velocity
+         command itself produces liftoff thrust. 0.06 was too gentle, PX4 never
+         spun up enough thrust to leave the ground and auto-disarmed. 0.3 lifts
+         cleanly; lower toward the liftoff threshold if you want it gentler, or
+         raise if it still won't break ground. The VIO-altitude completion stops
+         it at hover_z regardless of this rate. -->
+    <param name="takeoff_climb_rate" value="0.5"/>
+    <param name="takeoff_soft_start_s" value="3.0"/>
+    <!-- after arming, hold on the ground this long for the EKF/SVO to
+         converge BEFORE climbing (prevents post-takeoff divergence). -->
+    <param name="converge_hold_s"    value="6.0"/>
+    <!-- Custom outer-loop position-hold PID (velocity_cmd = Kp*err + Ki*∫err
+         - Kd*vel). Tune these for hover stiffness; D uses the VIO velocity to
+         damp drift. use_pid_hold:=false reverts to PX4-native position hold. -->
+    <param name="use_pid_hold" value="true"/>
+    <param name="hold_kp_xy"   value="1.0"/>
+    <param name="hold_ki_xy"   value="0.50"/>   <!-- keeps backward lean trimmed -->
+    <param name="hold_kd_xy"   value="0.45"/>   <!-- damping up: kill overshoot -->
+    <!-- D-term velocity low-pass (0..1): smooths VIO velocity so the higher Kd
+         damps instead of jittering. Lower = smoother. -->
+    <param name="hold_vel_lp"  value="0.4"/>
+    <!-- z hold: the recovery-velocity CLAMP (max_step_vel_z=0.5) fixed the
+         sink, not the gain, so keep Kp_z moderate. High Kp_z just saturates
+         the clamp and bang-bangs ("팍 올렸다 팍 내렸다"). -->
+    <!-- Gentler z loop to kill the up/down limit-cycle ("확 내렸다 확 올라가"):
+         lower Kp/Ki so the loop doesn't over-react to the noisy phantom vz, but
+         keep i_limit_z room so the integral still reaches the target bias. -->
+    <param name="hold_kp_z"    value="1.0"/>
+    <param name="hold_ki_z"    value="0.40"/>
+    <!-- Kd uses the EKF vertical velocity = noisy PHANTOM, so a big Kd just
+         injects noise (worse swings). Keep it small. -->
+    <param name="hold_kd_z"    value="0.15"/>
+    <param name="hold_i_limit" value="0.5"/>
+    <!-- z integral gets more room than xy so it can bias up to the target. -->
+    <param name="hold_i_limit_z" value="1.0"/>
+    <!-- tighter z slew than xy: smooths the phantom-driven vz swings. -->
+    <param name="hold_accel_lim_z" value="1.2"/>
+    <!-- output accel (slew-rate) limit (m/s^2): a SOFT cap on command jumps.
+         Set generous (3.0) so it only catches extreme steps; a tight value adds
+         deceleration lag that itself CAUSES overshoot. Real smoothing/damping
+         comes from Kd + the velocity low-pass, not from this clamp. -->
+    <param name="hold_accel_lim" value="3.0"/>
   </node>
 </launch>

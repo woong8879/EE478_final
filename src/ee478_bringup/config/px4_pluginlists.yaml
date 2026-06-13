@@ -1,0 +1,18 @@
+# MAVROS plugin blacklist for EE478 (SLAM-assisted MANUAL flight).
+# Adds waypoint/geofence/rallypoint to the stock blacklist: we never use
+# missions/geofence/rally, and their startup pull retries spam the console
+# ("WP/GF/RP: timed out"), burying useful output. Harmless to disable.
+plugin_blacklist:
+# --- mavros stock ---
+- safety_area
+- image_pub
+- vibration
+- distance_sensor
+- rangefinder
+- wheel_odometry
+# --- not used on this drone (manual SLAM flight) -> stop the timeout spam ---
+- waypoint      # WP: mission pull
+- geofence      # GF: geofence pull
+- rallypoint    # RP: rally-point pull
+
+plugin_whitelist: []

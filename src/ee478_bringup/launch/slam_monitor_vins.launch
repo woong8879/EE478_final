@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<!--
+  RViz monitor for the VINS-Fusion path. Same layout as slam_monitor but
+  the VIO odometry arrow points at /vins_estimator/odometry and the
+  second image panel shows the left IR (what VINS actually tracks).
+  Run on a ground laptop (set ROS_MASTER_URI/ROS_IP) to keep Jetson CPU free.
+-->
+<launch>
+  <node pkg="ee478_bringup" type="pose_to_path_node.py" name="pose_to_path"
+        output="screen">
+    <param name="topics"
+           value="/mavros/local_position/pose:/ekf_path,/mavros/vision_pose/pose:/vio_path"/>
+  </node>
+
+  <node pkg="rviz" type="rviz" name="slam_monitor"
+        args="-d $(find ee478_bringup)/rviz/slam_monitor_vins.rviz"
+        output="screen"/>
+</launch>

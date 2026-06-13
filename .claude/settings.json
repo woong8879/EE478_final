@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "defaultMode": "bypassPermissions",
+    "allow": [
+      "Bash",
+      "Read",
+      "Write",
+      "Edit",
+      "Grep",
+      "Glob",
+      "Skill",
+      "WebFetch",
+      "WebSearch",
+      "Monitor",
+      "TaskStop",
+      "TaskOutput",
+      "TodoWrite",
+      "Bash(rm -rf /home/team5/PX4-Autopilot)",
+      "Bash(rm -rf /home/team5/.ccache)",
+      "Bash(rm -rf /home/team5/.cache/* /home/team5/.cache/.??*)",
+      "Bash(sudo apt *)"
+    ]
+  }
+}

@@ -1,0 +1,185 @@
+<?xml version="1.0"?>
+<!--
+  RealSense D435i bring-up for VINS-Fusion (stereo IR + IMU) on the real
+  drone, while ALSO publishing depth + point cloud for EGO-Planner.
+
+  VINS-Fusion uses:
+    /camera/infra1/image_rect_raw   (left  IR, rectified)
+    /camera/infra2/image_rect_raw   (right IR, rectified)
+    /camera/imu                     (D435i BMI055, hardware-synced w/ cameras)
+
+  EGO-Planner uses (independent of VINS):
+    /camera/depth/color/points      (obstacle cloud)
+
+  Notes:
+    * IR cameras are global-shutter and hardware-synced with the IMU, so
+      VINS gets a tightly time-aligned stereo-inertial stream (no MAVROS
+      clock mismatch like the RTAB path had).
+    * emitter (IR projector) LEFT ON: needed for usable depth on blank
+      surfaces (EGO). The projected dots are scene-fixed between frames
+      and generally help, not hurt, VINS feature tracking. If they cause
+      trouble, set emitter:=0 (depth quality drops) or use emitter_on_off.
+    * Requires usbcore.usbfs_memory_mb>=1000 or IR+depth+IMU streams drop.
+-->
+<launch>
+  <arg name="initial_reset" default="true"/>
+  <!-- TWO D435i are connected now (forward VIO cam + downward delivery cam).
+       Pin the serial so this launch ALWAYS grabs the forward one. -->
+  <arg name="serial_no"     default="238722070618"/>
+  <arg name="emitter"       default="1"/>   <!-- 0=off, 1=on -->
+  <!-- Color ON (small: 424x240@15): the delivery phase needs the forward RGB.
+       The driver-level stream must run from boot because realsense ros1 cannot
+       start a stream at runtime (restarting the camera node in flight = USB
+       re-enum = VIO death). The TOPIC is gated: delivery_trigger republishes it
+       at 10 Hz only after the near-tag trigger, so "RGB stream starts" then. -->
+  <arg name="enable_color"  default="true"/>
+  <!-- Camera IMU (BMI055 motion module) OFF by default: we localize with the
+       Pixhawk IMU now (SVO + VINS vio_px4), and the D435i motion module is
+       the flaky one — it spams "control_transfer ... Resource temporarily
+       unavailable (index 768)" + "Motion Module failure" and wedges the USB.
+       Disabling it makes the camera much more stable. Set enable_imu:=true
+       only for the legacy VINS vio mode (camera IMU). -->
+  <arg name="enable_imu"    default="false"/>
+
+
+  <arg name="width"  default="640"/>
+  <arg name="height" default="480"/>
+  <!-- Colour is for YOLO only; run it SMALL (424x240) + slow. YOLO letterboxes
+       to its own input size anyway, so a low-res colour frame is plenty for
+       store/sign detection, and it is the lightest 4th stream the realsense
+       nodelet can serve -> stops the RGB stream from being starved/dropped. -->
+  <arg name="color_width"  default="424"/>
+  <arg name="color_height" default="240"/>
+  <!-- Per-stream rate budget. The D435i ties the depth stream to the IR
+       (stereo-depth) sensor rate, so depth effectively runs at infra_fps no
+       matter what depth_fps says — set it to 30 to match reality. USB3 (5 Gb/s,
+       measured) has the bandwidth; the camera is pinned to dedicated cores
+       (see below) so the higher rates don't starve the streaming thread.
+         IR (VO)    : 30 fps  — VO needs the high rate
+         depth (EGO): 30 fps  — full rate (= IR rate on D435i)
+         colour     : 15 fps  — store/sign recognition (D435i color does NOT
+                              support 10 fps at 424x240; valid: 6/15/30/60) -->
+  <arg name="infra_fps" default="30"/>
+  <arg name="depth_fps" default="30"/>
+  <arg name="color_fps" default="15"/>
+  <!-- depth toggle: enable_depth:=false = IR-only (SVO) without the camera's
+       depth ASIC/USB load. Used to isolate the brownout (IR-only survives,
+       +depth dies => depth ASIC power is the trigger). -->
+  <arg name="enable_depth" default="true"/>
+
+  <!-- Depth post-processing filters. RAW D435i depth bleeds intermediate-depth
+       pixels at sharp edges (a thin gate frame against open space smears INTO
+       the hole, shrinking it). spatial = edge-preserving clean-up, temporal =
+       reject flickering edge pixels. NO decimation (it halves resolution and
+       breaks the fx/cx EGO uses). Tune/extend with depth_filters:=... -->
+  <arg name="depth_filters" default=""/>   <!-- off: perception was already fine; spatial/temporal didn't change the map and temporal ghosts in flight. Set spatial,temporal only if you see real edge noise. -->
+
+  <include file="$(find realsense2_camera)/launch/rs_camera.launch">
+    <arg name="serial_no"     value="$(arg serial_no)"/>
+    <arg name="initial_reset" value="$(arg initial_reset)"/>
+    <arg name="filters"       value="$(arg depth_filters)"/>
+
+    <!-- Stereo IR for VINS -->
+    <arg name="enable_infra1" value="true"/>
+    <arg name="enable_infra2" value="true"/>
+    <arg name="infra_width"   value="$(arg width)"/>
+    <arg name="infra_height"  value="$(arg height)"/>
+    <arg name="infra_fps"     value="$(arg infra_fps)"/>
+
+    <!-- Depth + cloud for EGO-Planner -->
+    <arg name="enable_depth"      value="$(arg enable_depth)"/>
+    <arg name="depth_width"       value="$(arg width)"/>
+    <arg name="depth_height"      value="$(arg height)"/>
+    <arg name="depth_fps"         value="$(arg depth_fps)"/>
+    <!-- pointcloud OFF on the camera nodelet: generating it there blocks
+         the streaming thread and starves the IR streams (one IR drops to
+         ~12 Hz -> stereo mismatch -> VINS diverges). A separate
+         depth_image_proc nodelet below builds the cloud off-thread. -->
+    <arg name="enable_pointcloud" value="false"/>
+    <arg name="allow_no_texture_points" value="true"/>
+
+    <!-- Colour OFF by default: only perception (store/sign recognition)
+         needs it, and that is not integrated yet. Running it as a 4th
+         stream just adds USB load and trips the uvc watchdog. Re-enable
+         with enable_color:=true when wiring perception. The point cloud
+         stays usable via allow_no_texture_points. -->
+    <arg name="enable_color"  value="$(arg enable_color)"/>
+    <arg name="color_width"   value="$(arg color_width)"/>
+    <arg name="color_height"  value="$(arg color_height)"/>
+    <arg name="color_fps"     value="$(arg color_fps)"/>
+
+    <!-- D435i IMU (hardware-synced with the IR cameras) -->
+    <arg name="enable_gyro"       value="$(arg enable_imu)"/>
+    <arg name="enable_accel"      value="$(arg enable_imu)"/>
+    <arg name="unite_imu_method"  value="linear_interpolation"/>
+
+    <arg name="publish_tf"  value="true"/>
+    <arg name="enable_sync" value="true"/>
+  </include>
+
+  <!-- IR projector on/off. Off gives cleaner IR for VINS but worse depth. -->
+  <rosparam param="/camera/realsense2_camera/stereo_module/emitter_enabled"
+            subst_value="true">$(arg emitter)</rosparam>
+
+  <!-- FIXED SHORT IR EXPOSURE (critical for VIO on a vibrating drone).
+       With auto-exposure the D435i uses long exposures indoors; motor
+       vibration then smears the IR image and SVO loses tracked features by
+       the dozen ("Lost N features") -> VIO diverges on takeoff. A short
+       FIXED exposure freezes the motion; the IR projector dots stay bright
+       enough to track even at short exposure. Tune ir_exposure (us) to the
+       scene: lower = sharper but darker. enable_auto_exposure must be off
+       for the manual exposure/gain to take effect. -->
+  <!-- 4 ms / gain 16: tuned live to this scene = good contrast, not washed
+       out. 8 ms/40 OVER-exposed to white -> no usable features; and high gain
+       (~90) just adds noise (that, not the 4 ms, is what broke init earlier).
+       Low gain 16 keeps it clean; 4 ms also reduces motion blur. Scene darker
+       -> raise exposure/gain a bit; washed out -> lower them. -->
+  <arg name="ir_exposure" default="4000"/>   <!-- microseconds (4 ms) -->
+  <arg name="ir_gain"     default="30"/>
+
+  <!-- STARTUP exposure: set the params in the dynamic_reconfigure SERVER's
+       own namespace (/camera/stereo_module), NOT /camera/realsense2_camera/...
+       The reconfigure server reads its initial values from here when it is
+       created, so the IR comes up at the fixed exposure from the first frame
+       (auto OFF), no late switch. (Earlier attempts set the wrong namespace,
+       which is why it stayed AUTO and only the runtime dynparam took.) -->
+  <param name="/camera/stereo_module/enable_auto_exposure" value="false"/>
+  <param name="/camera/stereo_module/exposure" value="$(arg ir_exposure)"/>
+  <param name="/camera/stereo_module/gain"     value="$(arg ir_gain)"/>
+
+  <!-- Backup: if the server doesn't pick up the startup values, this one-shot
+       forces them via dynparam once the server is up (idempotent). -->
+  <node pkg="ee478_bringup" type="set_ir_exposure.sh" name="set_ir_exposure"
+        args="$(arg ir_exposure) $(arg ir_gain)" output="screen"/>
+
+  <!-- global time: host-clock stamps (consistency w/ MAVROS for vision_pose) -->
+  <param name="/camera/realsense2_camera/stereo_module/global_time_enabled" value="true"/>
+  <param name="/camera/realsense2_camera/rgb_camera/global_time_enabled"    value="true"/>
+
+  <!-- Build the EGO obstacle cloud OFF the camera streaming thread, in its
+       own nodelet manager, so it never starves the IR streams. Publishes
+       /camera/depth/points (point against camera_depth_optical_frame). -->
+  <!-- taskset: keep the cloud nodelet OFF cores 0,1 (reserved for the camera
+       nodelet) so depth->cloud never competes with USB frame servicing. Cores
+       0,1 are enough for the camera even at 30 fps depth+IR+10 colour (it uses
+       <1 core; what matters is its USB-servicing thread not being preempted).
+       Everything else (cloud, svo, relay, offboard) shares cores 2-5, leaving
+       headroom for the EGO planner + YOLO that also run there. -->
+  <!-- Cloud OFF by default: EGO uses pose_type=1 (depth IMAGE projected in C++),
+       so /camera/depth/points is UNUSED and the depth->cloud nodelet is pure CPU
+       overhead that starves the rest. Re-enable (enable_cloud:=true) only if a
+       consumer actually needs the point cloud. -->
+  <arg name="enable_cloud" default="false"/>
+  <group if="$(arg enable_cloud)">
+    <node pkg="nodelet" type="nodelet" name="cloud_nodelet_manager"
+          args="manager" output="screen"
+          launch-prefix="taskset -c 2-5"/>
+    <node pkg="nodelet" type="nodelet" name="depth_to_cloud"
+          args="load depth_image_proc/point_cloud_xyz cloud_nodelet_manager"
+          output="screen">
+      <remap from="camera_info"      to="/camera/depth/camera_info"/>
+      <remap from="image_rect"       to="/camera/depth/image_rect_raw"/>
+      <remap from="points"           to="/camera/depth/points"/>
+    </node>
+  </group>
+</launch>

@@ -1,0 +1,63 @@
+<?xml version="1.0"?>
+<!--
+  Delivery-phase camera system.
+
+  down_camera (2nd D435i, RGB-only, driver stream from boot)
+  delivery_trigger: store tag 271/274/275/276 seen within 0.5 m
+                    (/apriltag/detections) -> /delivery/active=true ->
+                    BOTH RGB topics start at 10 Hz:
+                       /delivery/down_rgb   (downward cam)
+                       /delivery/main_rgb   (forward cam color)
+  yolo_delivery:    YOLOv11 best.pt on /delivery/down_rgb
+                    -> /delivery/yolo/detections + /delivery/yolo/image
+-->
+<launch>
+  <arg name="down_serial" default="034422072213"/>
+  <arg name="engine"      default="/home/team5/EE478_final/best.engine"/>
+  <!-- 0 = stay active forever once triggered; >0 = turn back off after this
+       many seconds without a near store-tag detection. -->
+  <arg name="hold_s"      default="0.0"/>
+
+  <include file="$(find ee478_bringup)/launch/down_camera.launch">
+    <arg name="serial_no" value="$(arg down_serial)"/>
+  </include>
+
+  <node pkg="ee478_bringup" type="delivery_trigger_node.py"
+        name="delivery_trigger" output="screen" launch-prefix="taskset -c 2-5">
+    <param name="hold_s" value="$(arg hold_s)"/>
+    <rosparam>
+      trigger_ids: [271, 274, 275, 276]
+      trigger_range_m: 1.12   # tags sit +-1 m to the sides, so a 1.12 m tag
+                              # range = 0.5 m IN FRONT of the gate wall
+                              # (x=4.0 for gate3) -> YOLO on just before passing
+      rgb_rate_hz: 10.0
+      down_rgb_in: /down_camera/color/image_raw
+      main_rgb_in: /camera/color/image_raw
+    </rosparam>
+  </node>
+
+  <!-- YOLOs read the GATED relay topics (/delivery/*_rgb), which only flow
+       when /delivery/active is true. Early activation is handled by the gate-2
+       force in final_mission, so by the final gate the relay is warmed up.
+       (Reading the raw camera topics directly delivered NO frames in flight,
+       so we stay on the proven relay path.) -->
+  <!-- conf 0.6 (was 0.8): the hamburger label barely cleared 0.8 so the
+       target was almost never published. False positives are filtered
+       downstream (windowed N-hit confirm + AR gate + conf_min). -->
+  <node pkg="ee478_bringup" type="yolo_delivery_node.py"
+        name="yolo_delivery" output="screen" launch-prefix="taskset -c 2-5">
+    <param name="engine"      value="$(arg engine)"/>
+    <param name="image_topic" value="/delivery/down_rgb"/>
+    <param name="conf"        value="0.6"/>
+  </node>
+
+  <!-- 2nd instance on the FORWARD camera: detects the box FRONT faces for the
+       precision-landing approach. -> /delivery/yolo_front/{detections,image} -->
+  <node pkg="ee478_bringup" type="yolo_delivery_node.py"
+        name="yolo_front" output="screen" launch-prefix="taskset -c 2-5">
+    <param name="engine"      value="$(arg engine)"/>
+    <param name="image_topic" value="/delivery/main_rgb"/>
+    <param name="out_ns"      value="/delivery/yolo_front"/>
+    <param name="conf"        value="0.6"/>
+  </node>
+</launch>

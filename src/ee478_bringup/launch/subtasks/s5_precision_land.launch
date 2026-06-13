@@ -1,0 +1,75 @@
+<?xml version="1.0"?>
+<!--
+  Sub-task 5: PRECISION LANDING on the target box behind the store gate.
+  ======================================================================
+  Same planner stack as s4 (s1 takeoff + EGO); precision_land_node drives the
+  course: through the HARDCODED gate (gate:=left tags 271/274 centre (3.5,6.2),
+  gate:=right tags 275/276 centre (3.5,8.2); the real task will quiz a monitor,
+  not present yet) -> force RGB+YOLO on -> strafe-search the target label
+  (front cam) -> visual-servo approach -> climb + creep forward until the DOWN
+  camera sees the box top -> centre it (down cam is 14.5 cm behind the body
+  centre; image top = drone back) -> COMMIT: step back 14.5 cm, descend, force
+  disarm on the box.
+
+    roslaunch ee478_bringup s5_precision_land.launch gate:=left target:=cafe
+
+  Place/launch the stack so the map origin matches the course (takeoff spot).
+  waypoint_loop is NOT used; the node publishes /next_goal + /offboard/cmd_raw.
+-->
+<launch>
+  <arg name="platform"   default="real"/>
+  <arg name="vio_source" default="gt"/>
+  <arg name="hover_z"    default="0.7"/>
+  <arg name="gate"       default="left"/>    <!-- left | right (hardcoded quiz) -->
+  <arg name="target"     default="cafe"/>    <!-- store|pharmacy|hamburger|cafe -->
+  <arg name="land_z"     default="0.45"/>    <!-- disarm altitude ~= box top -->
+  <arg name="max_vel"
+       default="$(eval 0.3 if arg('platform') == 'real' else 1.0)"/>
+  <arg name="fcu_url"
+       default="serial:///dev/ttyTHS0:921600"/>
+
+  <include file="$(find ee478_bringup)/launch/subtasks/s1_takeoff.launch">
+    <arg name="platform"   value="$(arg platform)"/>
+    <arg name="vio_source" value="$(arg vio_source)"/>
+    <arg name="hover_z"    value="$(arg hover_z)"/>
+    <arg name="fcu_url"    value="$(arg fcu_url)"/>
+  </include>
+
+  <!-- EGO local planner: identical to s4 (used for the gate leg). -->
+  <arg name="cloud_topic"
+       default="$(eval '/iris_depth_camera_vio/camera/depth/points'
+                       if arg('platform') == 'sim'
+                       else '/camera/depth/points')"/>
+  <arg name="z_band" default="0.2"/>
+  <arg name="max_acc" default="0.3"/>
+  <arg name="max_jer" default="2.0"/>
+  <include file="$(find ee478_planner)/launch/ego_planner.launch">
+    <arg name="platform"         value="$(arg platform)"/>
+    <arg name="cloud_topic"      value="$(arg cloud_topic)"/>
+    <arg name="planning_horizon" value="3.0"/>
+    <arg name="max_vel"          value="$(arg max_vel)"/>
+    <arg name="max_acc"          value="$(arg max_acc)"/>
+    <arg name="max_jer"          value="$(arg max_jer)"/>
+    <arg name="hover_z"          value="$(arg hover_z)"/>
+    <arg name="virtual_ceil"     value="$(eval arg('hover_z') + arg('z_band') + 0.6)"/>
+    <arg name="virtual_ground"   value="-1.0"/>
+  </include>
+  <!-- NOTE virtual_ceil is raised +0.6 vs s4: the MOUNT phase climbs ~0.5 m
+       above hover to get over the box top. -->
+
+  <node pkg="ee478_agent" type="precision_land_node.py" name="precision_land"
+        output="screen" launch-prefix="taskset -c 2-5">
+    <param name="target_label" value="$(arg target)"/>
+    <param name="gate"         value="$(arg gate)"/>
+    <param name="hover_z"      value="$(arg hover_z)"/>
+    <param name="land_z"       value="$(arg land_z)"/>
+    <rosparam>
+      left_gate:  [3.5, 6.2]
+      right_gate: [3.5, 8.2]
+      pass_through_m: 1.2
+      pass_margin_m: 0.8
+      down_cam_back_m: 0.145
+      climb_dz: 0.5
+    </rosparam>
+  </node>
+</launch>

@@ -1,0 +1,138 @@
+Panels:
+  - Class: rviz/Displays
+    Name: Displays
+    Property Tree Widget:
+      Expanded: ~
+    Help: ~
+  - Class: rviz/Views
+    Name: Views
+  - Class: rviz/Time
+    Name: Time
+Visualization Manager:
+  Global Options:
+    Fixed Frame: map
+    Background Color: 25; 25; 30
+    Frame Rate: 30
+  Displays:
+    - Class: rviz/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 1
+      Plane Cell Count: 30
+      Color: 70; 70; 70
+      Reference Frame: map
+    - Class: rviz/TF
+      Name: TF
+      Enabled: false
+      Show Names: true
+      Show Axes: true
+      Marker Scale: 0.5
+    # --- EGO obstacle map (the INFLATED cells EGO plans against) ---
+    - Class: rviz/PointCloud2
+      Name: ObstacleMap_inflate
+      Enabled: true
+      Topic: /drone_0_ego_planner_node/grid_map/occupancy_inflate
+      Style: Boxes
+      Size (m): 0.1
+      Color Transformer: FlatColor
+      Color: 255; 90; 0
+      Alpha: 0.45
+      Queue Size: 10
+    # --- EGO raw occupancy (off by default; toggle on if needed) ---
+    - Class: rviz/PointCloud2
+      Name: ObstacleMap_raw
+      Enabled: false
+      Topic: /drone_0_ego_planner_node/grid_map/occupancy
+      Style: Boxes
+      Size (m): 0.1
+      Color Transformer: AxisColor
+      Axis: Z
+      Alpha: 0.8
+      Queue Size: 10
+    # --- EKF fused pose TRAIL (works on the current bag via odometry/out) ---
+    - Class: rviz/Odometry
+      Name: EKF_odom_trail
+      Enabled: true
+      Topic: /mavros/odometry/out
+      Keep: 300
+      Position Tolerance: 0.05
+      Angle Tolerance: 0.1
+      Shape: Arrow
+      Covariance:
+        Value: false
+      Color: 0; 255; 0
+    # --- Path trails (recorded from the NEXT flight on) ---
+    - Class: rviz/Path
+      Name: EKF_path
+      Enabled: true
+      Topic: /ekf_path
+      Color: 255; 40; 40
+      Line Width: 0.03
+    - Class: rviz/Path
+      Name: VIO_path
+      Enabled: true
+      Topic: /vio_path
+      Color: 0; 200; 255
+      Line Width: 0.03
+    - Class: rviz/Path
+      Name: SVO_path
+      Enabled: true
+      Topic: /svo_path
+      Color: 255; 220; 0
+      Line Width: 0.03
+    # --- live drone pose (EKF) ---
+    - Class: rviz/Pose
+      Name: Drone_EKF
+      Enabled: true
+      Topic: /mavros/local_position/pose
+      Shape: Arrow
+      Color: 0; 255; 0
+      Shaft Length: 0.3
+      Head Length: 0.1
+    # --- active waypoint goal ---
+    - Class: rviz/Pose
+      Name: NextGoal
+      Enabled: true
+      Topic: /next_goal
+      Shape: Arrow
+      Color: 255; 0; 255
+      Shaft Length: 0.4
+      Head Length: 0.15
+    # --- intended course waypoints (absolute/map coords) -> see drift ---
+    - Class: rviz/MarkerArray
+      Name: CourseWaypoints
+      Enabled: true
+      Marker Topic: /course_waypoints
+    # --- AprilTag anchor estimate (when anchor is on) ---
+    - Class: rviz/Pose
+      Name: AnchorPose
+      Enabled: true
+      Topic: /landmark_anchor_pose
+      Shape: Axes
+      Axes Length: 0.4
+      Axes Radius: 0.04
+  Tools:
+    - Class: rviz/MoveCamera
+    - Class: rviz/Select
+    - Class: rviz/FocusCamera
+    - Class: rviz/Measure
+  Views:
+    Current:
+      Class: rviz/Orbit
+      Name: Current View
+      Distance: 18
+      Focal Point:
+        X: 5
+        Y: 1
+        Z: 0.7
+      Pitch: 1.2
+      Yaw: 0.8
+      Target Frame: map
+  Value: true
+Window Geometry:
+  Displays:
+    collapsed: false
+  Height: 900
+  Width: 1500
+  Hide Left Dock: false
+  Hide Right Dock: false

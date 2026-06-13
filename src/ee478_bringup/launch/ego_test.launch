@@ -1,0 +1,57 @@
+<?xml version="1.0"?>
+<!--
+  ego_test.launch  -  FC-LESS EGO-Planner perception/planning test.
+
+  The flight controller crashed off, so there is no MAVROS. SVO still gives a
+  VIO pose from the RealSense IR, so EGO runs with NO FC at all:
+
+    RealSense (depth + IR)
+      -> SVO  (VIO body pose, no IMU, no FC)
+      -> svo_to_mavros  (republish SVO pose as /mavros/local_position/pose|odom)
+      -> EGO-Planner    (grid_map obstacle map + trajectory)
+
+  NOTHING flies. This is purely to verify the obstacle map + planning on the
+  bench. Move the drone/camera BY HAND to test mapping during motion.
+
+  Usage:
+    roslaunch ee478_bringup ego_test.launch
+    # then in RViz (ego_test.rviz) click "2D Nav Goal" to send a goal,
+    # OR:  rostopic pub -1 /next_goal geometry_msgs/PoseStamped \
+    #        '{header: {frame_id: "map"}, pose: {position: {x: 3, y: 0, z: 0.7}}}'
+
+  RViz:  rviz -d $(find ee478_bringup)/rviz/ego_test.rviz
+-->
+<launch>
+  <arg name="enable_color" default="false"/>   <!-- keep CPU/USB light -->
+  <arg name="goal_z"       default="0.7"/>
+
+  <!-- 1. Camera: depth (EGO) + IR (SVO). cloud off (pose_type=1). -->
+  <include file="$(find ee478_bringup)/launch/realsense_d435i_vins.launch">
+    <arg name="enable_cloud" value="false"/>
+    <arg name="enable_color" value="$(arg enable_color)"/>
+  </include>
+
+  <!-- 2. SVO VIO (no FC, no IMU - pure stereo) -> /svo/pose_imu -->
+  <include file="$(find ee478_localization)/launch/svo_real.launch"/>
+
+  <!-- 3. Static base_link -> camera_link mount (12.78 deg up tilt, Kalibr).
+          Normally published by px4_real.launch; we publish it here since MAVROS
+          is absent. RealSense publishes camera_link -> *_optical itself. -->
+  <node pkg="tf2_ros" type="static_transform_publisher" name="base_to_camera_link"
+        args="0.154 0.015 0.039 0 -0.2231 0 base_link camera_link"/>
+
+  <!-- 4. Bridge SVO pose -> the /mavros/local_position topics EGO expects. -->
+  <node pkg="ee478_planner" type="svo_to_mavros_node.py" name="svo_to_mavros"
+        output="screen" launch-prefix="taskset -c 2-5"/>
+
+  <!-- 5. EGO-Planner (real depth path). Uses the bridged pose/odom + depth. -->
+  <include file="$(find ee478_planner)/launch/ego_planner.launch">
+    <arg name="platform" value="real"/>
+  </include>
+
+  <!-- 6. RViz "2D Nav Goal" click -> /next_goal at flight height. -->
+  <node pkg="ee478_planner" type="rviz_goal_relay_node.py" name="rviz_goal_relay"
+        output="screen">
+    <param name="goal_z" value="$(arg goal_z)"/>
+  </node>
+</launch>
